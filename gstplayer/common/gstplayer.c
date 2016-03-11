@@ -204,13 +204,13 @@ int main(int argc,char* argv[])
     gchar *audioSinkName = NULL;
 
     gchar *downloadBufferPath = NULL;
-    guint64 ringBufferMaxSize = 0;
-    
-    gint64 bufferDuration = -1;
-    gint bufferSize = 0;
-    
+    gint ringBufferMaxSize = 0;
+
+    gint bufferDuration = -1;
+    gint bufferSize = -1;
+
     StrPair_t **pHeaderFields = NULL;
-    
+
     printf("%s >\n", __FILE__);
     signal(SIGINT, SigHandler);
     /* inform client that we can handle additional commands */
@@ -239,13 +239,13 @@ int main(int argc,char* argv[])
             audioTrackIdx = atoi(optarg);
             break;
         case 'r':
-            sscanf(optarg, "%llu", &ringBufferMaxSize);
+            sscanf(optarg, "%d", &ringBufferMaxSize);
             break;
         case 's':
             sscanf(optarg, "%d", &bufferSize);
             break;
         case 'd':
-            sscanf(optarg, "%lld", &bufferDuration);
+            sscanf(optarg, "%d", &bufferDuration);
             break;
         case 'p':
             downloadBufferPath = g_strdup(optarg);

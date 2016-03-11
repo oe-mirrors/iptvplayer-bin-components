@@ -555,7 +555,7 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
             }
             
             
-            if(0 < ring_buffer_max_size || 0 < buffer_duration || 0 < buffer_size)
+            if(0 < ring_buffer_max_size || 0 <= buffer_duration || 0 <= buffer_size)
             {
                 if(g_download_buffer_path && strlen(g_download_buffer_path) && ring_buffer_max_size)
                 {
@@ -563,7 +563,7 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
                     flags |= GST_PLAY_FLAG_DOWNLOAD;
                     g_signal_connect(G_OBJECT(g_gst_playbin), "element-added", G_CALLBACK(gsElementAddedCallback), NULL);
                     /* limit file size */
-                    g_object_set(g_gst_playbin, "ring-buffer-max-size", (guint64)(ring_buffer_max_size * 1024LL * 1024LL), NULL);
+                    g_object_set(g_gst_playbin, "ring-buffer-max-size", (guint64)(ring_buffer_max_size * 1024L), NULL);
                 }
                 /*
                  * regardless whether or not we configured a progressive download file, use a buffer as well
@@ -571,11 +571,11 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
                  */
                 flags |= GST_PLAY_FLAG_BUFFERING;
                 /* increase the default 2 second / 2 MB buffer limitations to 5s / 5MB */
-                if(buffer_duration > 0)
+                if(buffer_duration >= 0)
                 {
                     g_object_set(G_OBJECT(g_gst_playbin), "buffer-duration", buffer_duration * GST_SECOND, NULL);
                 }
-                if(g_buffer_size > 0)
+                if(g_buffer_size >= 0)
                 {
                     /* buffer_size should be set in KB */
                     g_object_set(G_OBJECT(g_gst_playbin), "buffer-size", buffer_size*1024, NULL);
