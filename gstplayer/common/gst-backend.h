@@ -79,7 +79,7 @@ typedef struct TrackDescription_s
 
 void backend_init(int *argc, char **argv[], const int sfd);
 void backend_deinit();
-int  backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buffer_max_size, gint64 buffer_duration, gint buffer_size, StrPair_t **http_header_fields);
+int  backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buffer_max_size, gint64 buffer_duration, gint buffer_size, StrPair_t **http_header_fields, gchar *video_sink_name, gchar *audio_sink_name);
 int  backend_stop();
 int  backend_seek(const double seconds);
 int  backend_seek_absolute(const double seconds);

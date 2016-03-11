@@ -23,6 +23,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <getopt.h>
+#include <ctype.h>
 
 #include "gst-backend.h"
 
@@ -108,35 +110,46 @@ static void InitInOut()
     fcntl(g_pfd[1], F_SETFL, flags | O_NONBLOCK); /* Make write end nonblocking */
 }
 
-static StrPair_t** GetHttpHeaderFields(int argc, char *argv[])
+static StrPair_t **AddHeader(StrPair_t **vector, const char *headerString)
 {
-    StrPair_t **headerFields = calloc(argc+1, sizeof(StrPair_t*));
-    int  i = 0;
-    int  hIdx = 0;
-    int  size = 0;
+    int cnt;
     char *ptr = 0;
-    
-    for(i=0; i<argc; ++i)
+    int size = 0;
+    StrPair_t *headerField = NULL;
+
+    ptr = strchr(headerString, '=');
+    if (ptr)
     {
-        ptr = strchr(argv[i], '=');
-        if(ptr)
-        {
-            headerFields[hIdx] = calloc(1, sizeof(StrPair_t));
-            
-            /* key */
-            size = ptr - argv[i];
-            headerFields[hIdx]->pKey = calloc(size, sizeof(char));
-            strncpy(headerFields[hIdx]->pKey, argv[i], size);
-            
-            /* val */
-            size = strlen(ptr+1);
-            headerFields[hIdx]->pVal = calloc(size+1, sizeof(char));
-            strncpy(headerFields[hIdx]->pVal, ptr+1, size);
-            
-            ++hIdx;
-        }
+        headerField = calloc(1, sizeof(StrPair_t));
+
+        /* key */
+        size = ptr - headerString;
+        headerField->pKey = calloc(size, sizeof(char));
+        strncpy(headerField->pKey, headerString, size);
+
+        /* val */
+        size = strlen(ptr+1);
+        headerField->pVal = calloc(size+1, sizeof(char));
+        strncpy(headerField->pVal, ptr+1, size);
     }
-    return headerFields;
+    if (headerField)
+    {
+
+        if (vector != NULL)
+        {
+            for (cnt = 0; vector[cnt]; cnt++)
+                ;
+            ++cnt;
+        }
+        else
+            cnt = 1;
+
+        vector = realloc(vector, (cnt+1) * sizeof(StrPair_t *));
+
+        vector[cnt-1] = headerField;
+        vector[cnt] = NULL;
+    }
+    return vector;
 }
 
 static int HandleTracks(const char *argvBuff)
@@ -184,9 +197,12 @@ int main(int argc,char* argv[])
     int audioTrackIdx = -1;
     int commandRetVal = -1;
     int retCode = 0;
-    
+
     gchar *filename = NULL;
-    
+
+    gchar *videoSinkName = NULL;
+    gchar *audioSinkName = NULL;
+
     gchar *downloadBufferPath = NULL;
     guint64 ringBufferMaxSize = 0;
     
@@ -205,68 +221,56 @@ int main(int argc,char* argv[])
 #endif
     fprintf(stderr, "{\"GSTPLAYER_EXTENDED\":{\"version\":%d,\"gst_ver_major\":%d}}\n", ver, GST_VERSION_MAJOR);
 
+    int c;
+    opterr = 0;
+
     int usedArgs = 2;
     if(usedArgs > argc)
     {
-        printf("Version for gstreamer %d.X\n", GST_VERSION_MAJOR);
-        printf("give me a filename please\n");
+        printf("Usage: gstplayer filePath [-i audio track index] [-r ring-buffer-max-size] [-s buffer-size] [-d buffer-duration] [-p buffer-path] [-H http-header] [-v videosink] [-a audiosink]\n");
         exit(1);
     }
-    
     filename = g_strdup(argv[1]);
-    
-    if(argc>usedArgs)
-    {
-        audioTrackIdx = atoi(argv[usedArgs]);
-    }
-    ++usedArgs;
-    
-    if(argc>usedArgs)
-    {
-        backend_set_download_timeout( atoi(argv[usedArgs]) );
-    }
-    ++usedArgs;
-    
-    if(argc>usedArgs)
-    {
-        backend_set_is_live( atoi(argv[usedArgs]) );
-    }
-    ++usedArgs;
-    
-    if(argc>usedArgs)
-    {
-        downloadBufferPath = g_strdup(argv[usedArgs]);
-    }
-    ++usedArgs;
-    
-    if(argc>usedArgs)
-    {
-        sscanf(argv[usedArgs], "%llu", &ringBufferMaxSize);
-    }
-    ++usedArgs;
-    
-    if(argc>usedArgs)
-    {
-        sscanf(argv[usedArgs], "%lld", &bufferDuration);
-    }
-    ++usedArgs;
-    
-    if(argc>usedArgs)
-    {
-        sscanf(argv[usedArgs], "%d", &bufferSize);
-    }
-    
-    if(argc>(usedArgs+1) && !strncmp(filename, "http", 4))
-    {
-        pHeaderFields = GetHttpHeaderFields(argc-usedArgs, argv+usedArgs); 
-    }
-    
+
+    while ((c = getopt (argc-1, argv+1, "i:r:s:d:p:v:a:H:")) != -1)
+        switch (c)
+        {
+        case 'i':
+            audioTrackIdx = atoi(optarg);
+            break;
+        case 'r':
+            sscanf(optarg, "%llu", &ringBufferMaxSize);
+            break;
+        case 's':
+            sscanf(optarg, "%d", &bufferSize);
+            break;
+        case 'd':
+            sscanf(optarg, "%lld", &bufferDuration);
+            break;
+        case 'p':
+            downloadBufferPath = g_strdup(optarg);
+            break;
+        case 'v':
+            videoSinkName = g_strdup(optarg);
+            break;
+        case 'a':
+            audioSinkName = g_strdup(optarg);
+            break;
+        case 'H':
+            pHeaderFields = AddHeader(pHeaderFields, optarg);
+            break;
+        case '?':
+        default:
+            printf("Usage: gstplayer filePath [-i audio track index] [-r ring-buffer-max-size] [-s buffer-size] [-d buffer-duration] [-p buffer-path] [-H http-header] [-v videosink] [-a audiosink]\n");
+            exit(1);
+        }
+
     InitInOut();
     backend_init(&argc, &argv, g_pfd[1]);
-    commandRetVal = backend_play(filename, downloadBufferPath, ringBufferMaxSize, bufferDuration, bufferSize, pHeaderFields);
+    commandRetVal = backend_play(filename, downloadBufferPath, ringBufferMaxSize, bufferDuration, bufferSize, pHeaderFields, videoSinkName, audioSinkName);
     fprintf(stderr, "{\"PLAYBACK_PLAY\":{\"file\":\"%s\", \"sts\":%d}}\n", argv[1], commandRetVal);
 
-    if(0 == commandRetVal) 
+    if(0 == commandRetVal)
     {
         while(!g_terminated && backend_get_playback_info()->isPlaying)
         {

@@ -531,7 +531,7 @@ void backend_init(int *argc, char **argv[], const int sfd)
     gst_init(argc, argv);
 }
 
-int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buffer_max_size, gint64 buffer_duration, gint buffer_size, StrPair_t **http_header_fields)
+int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buffer_max_size, gint64 buffer_duration, gint buffer_size, StrPair_t **http_header_fields, gchar *videosink, gchar *audiosink)
 {
     backend_stop();
     g_filename               = filename;
@@ -629,6 +629,17 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
             }
             
             g_object_set(G_OBJECT (g_gst_playbin), "flags", flags, NULL);
+
+            if (videosink != NULL)
+            {
+                GstElement *vsink = gst_element_factory_make(videosink, NULL);
+                g_object_set(G_OBJECT (g_gst_playbin), "video-sink", vsink, NULL);
+            }
+            if (audiosink != NULL)
+            {
+                GstElement *asink = gst_element_factory_make(audiosink, NULL);
+                g_object_set(G_OBJECT (g_gst_playbin), "audio-sink", asink, NULL);
+            }
             g_free(uri);
         }
 
