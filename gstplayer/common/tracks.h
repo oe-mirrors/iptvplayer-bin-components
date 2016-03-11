@@ -17,6 +17,16 @@ int g_audio_idx = -1;
 int g_video_idx = -1;
 int g_subtitle_idx = -1;
 
+
+static void freeTrackDescription(TrackDescription_t *track)
+{
+    if (NULL != track)
+    {
+        free(track->Name);
+        free(track->Encoding);
+    }
+}
+
 static void UpdateVideoTrackInf()
 {
     backend_get_current_track('v');
@@ -207,9 +217,15 @@ static void FillAudioTracks()
     //m_audioStreams.clear();
     if (NULL != g_audio_tracks)
     {
-        return;
+        int i;
+        for (i=0; i < g_audio_num; i++)
+        {
+            freeTrackDescription(&(g_audio_tracks[i]));
+        }
+        free(g_audio_tracks);
+        g_audio_tracks = NULL;
     }
-    
+
     g_audio_tracks = malloc(sizeof(TrackDescription_t) * n_audio);
     memset(g_audio_tracks, 0, sizeof(TrackDescription_t) * n_audio);
     
@@ -337,7 +353,13 @@ static void FillSubtitlesTracks()
 
     if (NULL != g_subtitle_tracks)
     {
-        return;
+        int i;
+        for (i=0; i < g_subtitle_num; i++)
+        {
+            freeTrackDescription(&(g_subtitle_tracks[i]));
+        }
+        free(g_subtitle_tracks);
+        g_subtitle_tracks = NULL;
     }
 
     g_subtitle_tracks = malloc(sizeof(TrackDescription_t) * n_subtitles);
@@ -434,11 +456,13 @@ TrackDescription_t* backend_get_tracks_list(const char type, int *num)
     /* At now we need only audio track list */
     if ('a' == type)
     {
+        FillAudioTracks();
         pTracks = g_audio_tracks;
         localNum = g_audio_num;
     }
     else if ('s' == type)
     {
+        FillSubtitlesTracks();
         pTracks = g_subtitle_tracks;
         localNum = g_subtitle_num;
     }
