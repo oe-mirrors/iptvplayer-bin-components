@@ -82,6 +82,24 @@ void UpdateVideoTrackInf_2(const unsigned int framerate)
     }
 }
 
+void UpdateVideoTrackInf_3(const unsigned int progressive)
+{
+    TrackDescription_t *pVidTrack = GetVideoTrackForUpdate();
+    if(pVidTrack)
+    {
+        int updated = 0;
+        if(pVidTrack->progressive != progressive)
+        {
+            pVidTrack->progressive = progressive;
+            updated = 1;
+        }
+        if(updated)
+        {
+            UpdateVideoTrackInf();
+        }
+    }
+}
+
 static int GetCurrentTrack(const char *type, int *idx)
 {
     //if (*idx == -1)
@@ -333,6 +351,7 @@ static void FillVideoTracks()
                             }
                             track->frame_rate = num * 1000 / denom;
                         }
+                        track->progressive = -1;
                         ++j;
                     }
                     gst_caps_unref(caps);
@@ -526,10 +545,10 @@ TrackDescription_t* backend_get_current_track(const char type)
         else // video
         {
             // information about only current video track will be stored
-            fprintf(stderr, "{\"%c_%c\":{\"id\":%d,\"e\":\"%s\",\"n\":\"%s\",\"w\":%d,\"h\":%d,\"f\":%u}}\n", type, 'c', track->Id , track->Encoding, track->Name, track->width, track->height, track->frame_rate);
+            fprintf(stderr, "{\"%c_%c\":{\"id\":%d,\"e\":\"%s\",\"n\":\"%s\",\"w\":%d,\"h\":%d,\"f\":%u,\"p\":%d}}\n", type, 'c', track->Id , track->Encoding, track->Name, track->width, track->height, track->frame_rate, track->progressive);
         }
     }
-    return track; 
+    return track;
 }
 
 int backend_set_track(const char type, const int id)

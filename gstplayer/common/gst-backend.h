@@ -74,6 +74,7 @@ typedef struct TrackDescription_s
     unsigned int          frame_rate;
     int                   width;
     int                   height;
+    int                   progressive;
     
 } TrackDescription_t;
 
