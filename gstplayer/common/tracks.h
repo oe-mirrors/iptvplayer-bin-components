@@ -139,17 +139,13 @@ static int SelectSubtitleTrack(unsigned int i)
                 ppos = 0;
             }
         }
-
-        ret = SelectSubtitleStream(i);
-        if (!ret)
+        if (validposition)
         {
-            if (validposition)
-            {
-                /* flush */
-                double dpos = ppos/1000.0;
-                backend_seek_absolute(dpos);
-            }
+            /* flush */
+            double dpos = ppos/1000.0;
+            backend_seek_absolute(dpos);
         }
+        ret = SelectSubtitleStream(i);
     }
     else
     {
@@ -190,17 +186,13 @@ static int SelectAudioTrack(unsigned int i)
                 ppos = 0;
             }
         }
-
-        ret = SelectAudioStream(i);
-        if (!ret)
+        if (validposition)
         {
-            if (validposition)
-            {
-                /* flush */
-                double dpos = ppos/1000.0;
-                backend_seek_absolute(dpos);
-            }
+            /* flush */
+            double dpos = ppos/1000.0;
+            backend_seek_absolute(dpos);
         }
+        ret = SelectAudioStream(i);
     }
     else
     {
