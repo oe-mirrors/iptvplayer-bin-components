@@ -169,10 +169,10 @@ static int HandleTracks(const char *argvBuff)
             TrackDescription_t *track = backend_get_current_track(argvBuff[0]);
             break;
         }
-        default: 
+        default:
         {
             /* switch command available only for audio tracks */
-            if ('a' == argvBuff[0])
+            if ('a' == argvBuff[0] || 's' == argvBuff[0])
             {
                 int id = -1;
                 sscanf(argvBuff+1, "%d", &id);
@@ -209,6 +209,8 @@ int main(int argc,char* argv[])
     gint bufferDuration = -1;
     gint bufferSize = -1;
 
+    gboolean subtitlesEnabled = FALSE;
+
     StrPair_t **pHeaderFields = NULL;
 
     printf("%s >\n", __FILE__);
@@ -227,12 +229,12 @@ int main(int argc,char* argv[])
     int usedArgs = 2;
     if(usedArgs > argc)
     {
-        printf("Usage: gstplayer filePath [-i audio track index] [-r ring-buffer-max-size] [-s buffer-size] [-d buffer-duration] [-p buffer-path] [-H http-header] [-v videosink] [-a audiosink]\n");
+        printf("Usage: gstplayer filePath [-i audio-track index] [-r ring-buffer-max-size (bytes) ] [-s buffer-size (bytes) ] [-d buffer-duration (seconds) ] [-p buffer-path] [-H http-header] [-v videosink] [-a audiosink] [-e]\n");
         exit(1);
     }
     filename = g_strdup(argv[1]);
 
-    while ((c = getopt (argc-1, argv+1, "i:r:s:d:p:v:a:H:")) != -1)
+    while ((c = getopt (argc-1, argv+1, "i:r:s:d:p:v:a:eH:")) != -1)
         switch (c)
         {
         case 'i':
@@ -256,18 +258,21 @@ int main(int argc,char* argv[])
         case 'a':
             audioSinkName = g_strdup(optarg);
             break;
+        case 'e':
+            subtitlesEnabled = TRUE;
+            break;
         case 'H':
             pHeaderFields = AddHeader(pHeaderFields, optarg);
             break;
         case '?':
         default:
-            printf("Usage: gstplayer filePath [-i audio track index] [-r ring-buffer-max-size] [-s buffer-size] [-d buffer-duration] [-p buffer-path] [-H http-header] [-v videosink] [-a audiosink]\n");
+            printf("Usage: gstplayer filePath [-i audio-track index] [-r ring-buffer-max-size (bytes) ] [-s buffer-size (bytes) ] [-d buffer-duration (seconds) ] [-p buffer-path] [-H http-header] [-v videosink] [-a audiosink] [-e]\n");
             exit(1);
         }
 
     InitInOut();
     backend_init(&argc, &argv, g_pfd[1]);
-    commandRetVal = backend_play(filename, downloadBufferPath, ringBufferMaxSize, bufferDuration, bufferSize, pHeaderFields, videoSinkName, audioSinkName);
+    commandRetVal = backend_play(filename, downloadBufferPath, ringBufferMaxSize, bufferDuration, bufferSize, pHeaderFields, videoSinkName, audioSinkName, subtitlesEnabled);
     fprintf(stderr, "{\"PLAYBACK_PLAY\":{\"file\":\"%s\", \"sts\":%d}}\n", argv[1], commandRetVal);
 
     if(0 == commandRetVal)
@@ -300,7 +305,8 @@ int main(int argc,char* argv[])
             switch(argvBuff[0])
             {
             case 'v':
-            case 'a': 
+            case 'a':
+            case 's':
             {
                 HandleTracks(argvBuff);
                 break;

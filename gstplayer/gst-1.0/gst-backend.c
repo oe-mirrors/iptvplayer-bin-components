@@ -35,6 +35,7 @@ Based on:
 static GstElement *g_gst_playbin = NULL;
 static GstElement *g_dvbAudioSink   = NULL;
 static GstElement *g_dvbVideoSink   = NULL;
+static GstElement *g_subsink = NULL;
 static GstElement *g_gstIFDSrc   = NULL;
 static GstSeekFlags g_seek_flags  = GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT;
 #ifdef PLATFORM_I686
@@ -85,6 +86,40 @@ static gint64 getTimestamp()
 #endif
 }
 
+static void escape_newline(const char *src, char **dest)
+{
+    int tocopy = 0;
+    int newline = 0;
+    const char *ppos_src = src;
+    char *ppos_src_newline = 0;
+    char *ppos_dest = 0;
+
+    while ((ppos_src_newline = strchr(ppos_src, '\n')) != NULL)
+    {
+        ppos_src = ppos_src_newline;
+        ppos_src++;
+        newline++;
+    }
+    int origlen = strlen(src);
+    int newlen = origlen + newline + 1;
+
+    *dest = (char *) malloc(sizeof(char) * newlen);
+    ppos_dest = *dest;
+
+    ppos_src = src;
+    ppos_src_newline = 0;
+
+    while ((ppos_src_newline = strchr(ppos_src, '\n')) != NULL)
+    {
+        tocopy = ppos_src_newline - ppos_src;
+        strncpy(ppos_dest, ppos_src, tocopy);
+        ppos_src = ppos_src_newline + 1;
+        ppos_dest += tocopy;
+        *(ppos_dest++) = '\\';
+        *(ppos_dest++) = 'n';
+    }
+    strcpy(ppos_dest, ppos_src);
+}
 
 static gint match_sinktype(const GValue *velement, const gchar *type)
 {
@@ -143,6 +178,37 @@ static int ChangeSpeed(const gboolean result, const float fSpeed)
     }
     
     return -1;
+}
+
+static void gstCBsubtitleAvail(GstElement *subsink, GstBuffer *buffer, gpointer user_data)
+{
+    if (!buffer)
+        return;
+
+    GstMapInfo map;
+    if (!gst_buffer_map(buffer, &map, GST_MAP_READ))
+    {
+        gst_buffer_unref(buffer);
+        return;
+    }
+
+    if (GST_BUFFER_PTS_IS_VALID(buffer) && GST_BUFFER_DURATION_IS_VALID(buffer))
+    {
+        gchar *text = NULL;
+        gchar *data = g_strndup((const gchar *) map.data, map.size);
+        escape_newline(data, &text);
+        GstMessage *message = gst_message_new_application(GST_OBJECT(g_gst_playbin),
+            gst_structure_new ("subtitle",
+                "start", GST_TYPE_CLOCK_TIME, GST_BUFFER_PTS(buffer),
+                "duration", GST_TYPE_CLOCK_TIME, GST_BUFFER_DURATION(buffer),
+                "text", G_TYPE_STRING, text, NULL)
+            );
+        g_free(data);
+        g_free(text);
+        gst_element_post_message(g_gst_playbin, message);
+    }
+    gst_buffer_unmap(buffer, &map);
+    gst_buffer_unref(buffer);
 }
 
 static void gstAboutToFinishCallback(GstElement* object, gpointer userdata)
@@ -501,6 +567,24 @@ static gboolean gstBusCall(GstBus *bus, GstMessage *msg)
         gst_element_set_state(g_gst_playbin, GST_STATE_PLAYING);
         break;
     }
+    case GST_MESSAGE_APPLICATION:
+    {
+        const GstStructure *msgstruct = gst_message_get_structure(msg);
+        if (NULL != msgstruct)
+        {
+            const gchar *messagename = gst_structure_get_name(msgstruct);
+            if (!strcmp(messagename, "subtitle"))
+            {
+                const gchar *text;
+                GstClockTime start = GST_CLOCK_TIME_NONE;
+                GstClockTime duration = GST_CLOCK_TIME_NONE;
+                gst_structure_get_clock_time(msgstruct, "start", &start);
+                gst_structure_get_clock_time(msgstruct, "duration", &duration);
+                text = gst_structure_get_string(msgstruct, "text");
+                fprintf(stderr, "{\"PLAYBACK_SUBTITLE\":{\"start\":%lld, \"duration\":%lld, \"text\":\"%s\"}}\n", GST_TIME_AS_MSECONDS(start), GST_TIME_AS_MSECONDS(duration), text);
+            }
+        }
+    }
     default:
         break;
     }
@@ -531,7 +615,7 @@ void backend_init(int *argc, char **argv[], const int sfd)
     gst_init(argc, argv);
 }
 
-int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buffer_max_size, gint64 buffer_duration, gint buffer_size, StrPair_t **http_header_fields, gchar *videosink, gchar *audiosink)
+int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buffer_max_size, gint64 buffer_duration, gint buffer_size, StrPair_t **http_header_fields, gchar *videosink, gchar *audiosink, gboolean subtitles_enabled)
 {
     backend_stop();
     g_filename               = filename;
@@ -628,6 +712,22 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
                 g_object_set(G_OBJECT (g_gst_playbin), "uri", uri, NULL);
             }
             
+            if (subtitles_enabled)
+            {
+                g_subsink = gst_element_factory_make("subsink", NULL);
+                if (g_subsink)
+                {
+                    flags |= GST_PLAY_FLAG_TEXT;
+                    g_signal_connect (g_subsink, "new-buffer", G_CALLBACK (gstCBsubtitleAvail), NULL);
+                    g_object_set (G_OBJECT (g_subsink), "caps", gst_caps_from_string("text/plain; text/x-plain; text/x-raw; text/x-pango-markup"), NULL);
+                    g_object_set (G_OBJECT (g_gst_playbin), "text-sink", g_subsink, NULL);
+                    g_object_set (G_OBJECT (g_gst_playbin), "current-text", -1, NULL);
+                }
+                else
+                {
+                    printf("sorry, can't play subtitles: missing gst-plugin-subsink\n");
+                }
+            }
             g_object_set(G_OBJECT (g_gst_playbin), "flags", flags, NULL);
 
             if (videosink != NULL)

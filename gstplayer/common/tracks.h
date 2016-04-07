@@ -9,10 +9,13 @@
 int tracksReady = 0;
 TrackDescription_t *g_audio_tracks = NULL;
 TrackDescription_t *g_video_tracks = NULL;
+TrackDescription_t *g_subtitle_tracks = NULL;
 int g_audio_num = 0;
 int g_video_num = 0;
+int g_subtitle_num = 0;
 int g_audio_idx = -1;
 int g_video_idx = -1;
+int g_subtitle_idx = -1;
 
 static void UpdateVideoTrackInf()
 {
@@ -77,6 +80,57 @@ static int GetCurrentTrack(const char *type, int *idx)
     }
     return *idx;
 }
+
+static int SelectSubtitleStream(int i)
+{
+    int current_subtitle;
+    g_object_set (G_OBJECT (g_gst_playbin), "current-text", i, NULL);
+    g_object_get (G_OBJECT (g_gst_playbin), "current-text", &current_subtitle, NULL);
+    g_subtitle_idx = current_subtitle;
+    if ( current_subtitle == i )
+    {
+        return 0;
+    }
+    return -1;
+}
+
+static int SelectSubtitleTrack(unsigned int i)
+{
+    int ret = -1;
+    if (g_subtitle_num > 0)
+    {
+        int validposition = 0;
+        int64_t ppos = 0;
+
+        if (0 == backend_query_position(&ppos))
+        {
+            validposition = 1;
+            ppos -= 1000;
+            if (ppos < 0)
+            {
+                ppos = 0;
+            }
+        }
+
+        ret = SelectSubtitleStream(i);
+        if (!ret)
+        {
+            if (validposition)
+            {
+                /* flush */
+                double dpos = ppos/1000.0;
+                backend_seek_absolute(dpos);
+            }
+        }
+    }
+    else
+    {
+        g_subtitle_idx = i;
+        ret = 0;
+    }
+    return ret;
+}
+
 
 static int SelectAudioStream(int i)
 {
@@ -271,8 +325,65 @@ static void FillVideoTracks()
             }
         }
         g_video_num = j;
-    } 
-} 
+    }
+}
+
+static void FillSubtitlesTracks()
+{
+    gint i = 0;
+    gint n_subtitles = 0;
+
+    g_object_get(g_gst_playbin, "n-text", &n_subtitles, NULL);
+
+    if (NULL != g_subtitle_tracks)
+    {
+        return;
+    }
+
+    g_subtitle_tracks = malloc(sizeof(TrackDescription_t) * n_subtitles);
+    memset(g_subtitle_tracks, 0, sizeof(TrackDescription_t) * n_subtitles);
+
+    int j = 0;
+    for (i = 0; i < n_subtitles; i++)
+    {
+        gchar *g_codec   = NULL;
+        gchar *g_lang    = NULL;
+        GstTagList *tags = NULL;
+        GstPad* pad = 0;
+        g_signal_emit_by_name (g_gst_playbin, "get-text-pad", i, &pad);
+        GstCaps* caps = gst_pad_get_current_caps(pad);
+        if (!caps)
+        {
+            continue;
+        }
+        GstStructure* str = gst_caps_get_structure(caps, 0);
+        const gchar *g_type = gst_structure_get_name(str);
+
+        TrackDescription_t *track = &g_subtitle_tracks[j];
+        track->Id = i;
+        SetStr(&(track->Name), "und");
+        SetStr(&(track->Encoding), (char *)g_type);
+
+        g_signal_emit_by_name (g_gst_playbin, "get-text-tags", i, &tags);
+        if (tags && GST_IS_TAG_LIST(tags))
+        {
+            if (gst_tag_list_get_string(tags, GST_TAG_SUBTITLE_CODEC, &g_codec))
+            {
+                SetStr(&(track->Encoding), (char *)g_codec);
+                g_free(g_codec);
+            }
+            if (gst_tag_list_get_string(tags, GST_TAG_LANGUAGE_CODE, &g_lang))
+            {
+                SetStr(&(track->Name), (char *)g_lang);
+                g_free(g_lang);
+            }
+            gst_tag_list_free(tags);
+        }
+        gst_caps_unref(caps);
+        ++j;
+    }
+    g_subtitle_num = j;
+}
 
 static void TracksMessageAsyncDone()
 {
@@ -289,7 +400,19 @@ static void TracksMessageAsyncDone()
         }
         backend_get_current_track('a');
     }
-    
+
+    if (0 == g_subtitle_num)
+    {
+        int subtitle_idx = g_subtitle_idx;
+        FillSubtitlesTracks();
+        backend_get_tracks_list('s', NULL);
+        GetCurrentTrack("current-text", &g_subtitle_idx);
+        if (subtitle_idx >= 0 && subtitle_idx != g_subtitle_idx)
+        {
+            backend_set_track('s', subtitle_idx);
+        }
+        backend_get_current_track('s');
+    }
     if (0 == g_video_num)
     {
         int video_idx = g_video_idx;
@@ -314,7 +437,12 @@ TrackDescription_t* backend_get_tracks_list(const char type, int *num)
         pTracks = g_audio_tracks;
         localNum = g_audio_num;
     }
-    
+    else if ('s' == type)
+    {
+        pTracks = g_subtitle_tracks;
+        localNum = g_subtitle_num;
+    }
+
     if (NULL != num)
     {
         *num = localNum;
@@ -351,6 +479,12 @@ TrackDescription_t* backend_get_current_track(const char type)
         idx     = GetCurrentTrack("current-audio", &g_audio_idx);
         num     = g_audio_num;
     }
+    else if ('s' == type)
+    {
+        pTracks = g_subtitle_tracks;
+        idx     = GetCurrentTrack("current-text", &g_subtitle_idx);
+        num     = g_subtitle_num;
+    }
     else if ('v' == type)
     {
         pTracks = g_video_tracks;
@@ -361,7 +495,7 @@ TrackDescription_t* backend_get_current_track(const char type)
     if (idx >= 0 && idx < num && NULL != pTracks)
     {
         track = &pTracks[idx];
-        if ('a' == type)
+        if ('a' == type || 's' == type)
         {
             fprintf(stderr, "{\"%c_%c\":{\"id\":%d,\"e\":\"%s\",\"n\":\"%s\"}}\n", type, 'c', track->Id , track->Encoding, track->Name);
         }
@@ -380,6 +514,10 @@ int backend_set_track(const char type, const int id)
     if ('a' == type)
     {
         ret = SelectAudioTrack(id);
+    }
+    else if ('s' == type)
+    {
+        ret = SelectSubtitleTrack(id);
     }
     return ret;
 }
