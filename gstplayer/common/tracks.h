@@ -341,7 +341,7 @@ static void FillVideoTracks()
                             {
                                 denom = 1000;
                             }
-                            track->frame_rate = num * 1000 / denom;
+                            track->frame_rate = num * 1000L / denom;
                         }
                         track->progressive = -1;
                         ++j;
