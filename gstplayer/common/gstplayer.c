@@ -208,6 +208,8 @@ int main(int argc,char* argv[])
 
     gint bufferDuration = -1;
     gint bufferSize = -1;
+    gint downloadTimeout = -1;
+    gint isLive = -1;
 
     gboolean subtitlesEnabled = FALSE;
 
@@ -229,12 +231,12 @@ int main(int argc,char* argv[])
     int usedArgs = 2;
     if(usedArgs > argc)
     {
-        printf("Usage: gstplayer filePath [-i audio-track index] [-r ring-buffer-max-size (bytes) ] [-s buffer-size (bytes) ] [-d buffer-duration (seconds) ] [-p buffer-path] [-H http-header] [-v videosink] [-a audiosink] [-e]\n");
+    	printf("Usage: gstplayer filePath [-i audio-track index] [-l] [-t download-timeout] [-r ring-buffer-max-size (bytes) ] [-s buffer-size (bytes) ] [-d buffer-duration (seconds) ] [-p buffer-path] [-H http-header] [-v videosink] [-a audiosink] [-e]\n");
         exit(1);
     }
     filename = g_strdup(argv[1]);
 
-    while ((c = getopt (argc-1, argv+1, "i:r:s:d:p:v:a:eH:")) != -1)
+    while ((c = getopt (argc-1, argv+1, "i:r:s:d:p:t:l:v:a:eH:")) != -1)
         switch (c)
         {
         case 'i':
@@ -252,6 +254,12 @@ int main(int argc,char* argv[])
         case 'p':
             downloadBufferPath = g_strdup(optarg);
             break;
+        case 't':
+            sscanf(optarg, "%d", &downloadTimeout);
+            break;
+        case 'l':
+            isLive = 1;
+            break;
         case 'v':
             videoSinkName = g_strdup(optarg);
             break;
@@ -266,12 +274,17 @@ int main(int argc,char* argv[])
             break;
         case '?':
         default:
-            printf("Usage: gstplayer filePath [-i audio-track index] [-r ring-buffer-max-size (bytes) ] [-s buffer-size (bytes) ] [-d buffer-duration (seconds) ] [-p buffer-path] [-H http-header] [-v videosink] [-a audiosink] [-e]\n");
+            printf("Usage: gstplayer filePath [-i audio-track index] [-l] [-t download-timeout] [-r ring-buffer-max-size (bytes) ] [-s buffer-size (bytes) ] [-d buffer-duration (seconds) ] [-p buffer-path] [-H http-header] [-v videosink] [-a audiosink] [-e]\n");
             exit(1);
         }
 
     InitInOut();
     backend_init(&argc, &argv, g_pfd[1]);
+    if (isLive != -1)
+        backend_set_is_live(isLive);
+    if (downloadTimeout != -1)
+        backend_set_download_timeout(downloadTimeout);
+
     commandRetVal = backend_play(filename, downloadBufferPath, ringBufferMaxSize, bufferDuration, bufferSize, pHeaderFields, videoSinkName, audioSinkName, subtitlesEnabled);
     fprintf(stderr, "{\"PLAYBACK_PLAY\":{\"file\":\"%s\", \"sts\":%d}}\n", argv[1], commandRetVal);
 
