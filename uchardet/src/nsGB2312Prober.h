@@ -60,7 +60,7 @@ public:
 
 protected:
   void      GetDistribution(PRUint32 aCharLen, const char* aStr);
-  
+
   nsCodingStateMachine* mCodingSM;
   nsProbingState mState;
 

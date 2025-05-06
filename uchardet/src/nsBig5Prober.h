@@ -45,8 +45,8 @@
 class nsBig5Prober: public nsCharSetProber {
 public:
   nsBig5Prober(PRBool aIsPreferredLanguage)
-    :mIsPreferredLanguage(aIsPreferredLanguage) 
-  {mCodingSM = new nsCodingStateMachine(&Big5SMModel); 
+    :mIsPreferredLanguage(aIsPreferredLanguage)
+  {mCodingSM = new nsCodingStateMachine(&Big5SMModel);
     Reset();}
   virtual ~nsBig5Prober(void){delete mCodingSM;}
   nsProbingState HandleData(const char* aBuf, PRUint32 aLen);
@@ -58,7 +58,7 @@ public:
 
 protected:
   void      GetDistribution(PRUint32 aCharLen, const char* aStr);
-  
+
   nsCodingStateMachine* mCodingSM;
   nsProbingState mState;
 

@@ -37,7 +37,7 @@
 
 #include "../nsSBCharSetProber.h"
 
-static const unsigned char finnish_WINDOWS_1252CharToOrderMap[] = 
+static const unsigned char finnish_WINDOWS_1252CharToOrderMap[] =
 {
 255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
 255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
@@ -57,7 +57,7 @@ static const unsigned char finnish_WINDOWS_1252CharToOrderMap[] =
  77, 76, 75, 74, 73, 72, 20, 71, 70, 69, 68, 67, 61, 66, 65, 64,
 };
 
-static const PRUint8 finnishLangModel[] = 
+static const PRUint8 finnishLangModel[] =
 {
 3,3,3,3,3,3,2,3,3,3,3,3,3,3,3,2,3,3,3,0,0,0,0,0,3,0,0,0,0,0,0,0,
 0,0,0,0,2,0,0,0,0,0,2,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -189,7 +189,7 @@ static const PRUint8 finnishLangModel[] =
 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
 
-const SequenceModel Windows_1252FinnishModel = 
+const SequenceModel Windows_1252FinnishModel =
 {
   finnish_WINDOWS_1252CharToOrderMap,
   finnishLangModel,

@@ -161,13 +161,13 @@ SYM, 71,172, 66,173, 65,174, 76,175, 64,176,177, 77, 72,178, 69,  //60
 239, 68,240,241,242,243,244,245,246,247,248,249,250,251,NUM,CTR,
 };
 
-//Model Table: 
+//Model Table:
 //total sequences: 100%
 //first 512 sequences: 97.6601%
 //first 1024 sequences: 2.3389%
 //rest  sequences:      0.1237%
-//negative sequences:   0.0009% 
-static const PRUint8 RussianLangModel[] = 
+//negative sequences:   0.0009%
+static const PRUint8 RussianLangModel[] =
 {
 0,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1,1,3,3,3,3,1,3,3,3,2,3,2,3,3,
 3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,0,3,2,2,2,2,2,0,0,2,

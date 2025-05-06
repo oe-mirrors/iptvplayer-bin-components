@@ -3,9 +3,9 @@
 #include "vlc/include/subtitles.h"
 #include "ffmpeg/include/htmlsubtitles.h"
 
-#define IPTV_ULL_TYPE unsigned long long 
-#define IPTV_LL_TYPE long long 
-#define IPTV_UI_TYPE unsigned int 
+#define IPTV_ULL_TYPE unsigned long long
+#define IPTV_LL_TYPE long long
+#define IPTV_UI_TYPE unsigned int
 
 static const char SUB_PARSER_VERSION[] = "0.4";
 static const IPTV_UI_TYPE MAX_SUBTITLE_TEXT_SIZE = 1024;
@@ -24,21 +24,21 @@ static uint32_t words(const char sentence[ ])
 
     do
     {
-        switch(*it) 
+        switch(*it)
         {
-            case '\0': 
-            case ' ': 
-            case '\t': 
-            case '\n': 
+            case '\0':
+            case ' ':
+            case '\t':
+            case '\n':
             case '\r':
-                if (inword) 
+                if (inword)
                 {
-                    inword = 0; 
+                    inword = 0;
                     counted++;
                 }
                 break;
             default: inword = 1;
-        } 
+        }
     }while(*it++);
 
     return counted;
@@ -95,43 +95,43 @@ static PyObject * _subparser_parse(PyObject *self, PyObject *args)
     int i_WPM = 138;
     int i = 0;
     char *pszText = NULL;
-    PyObject *retObj = NULL; 
+    PyObject *retObj = NULL;
     PyObject *list = NULL;
     PyObject *elem = NULL;
     demux_sys_t *p_sys = NULL;
-    
+
     if (!PyArg_ParseTuple(args, "si|iiii", &inputStr, &i_microsecperframe, &b_removeTags, &b_setEndTime, &i_CPS, &i_WPM))
     {
         return NULL;
     }
-    
-    if (0 == i_CPS) 
+
+    if (0 == i_CPS)
     {
         PyErr_SetString(PyExc_ZeroDivisionError, "CPS can not be set to 0");
         return NULL;
     }
-    
-    if (0 == i_WPM) 
+
+    if (0 == i_WPM)
     {
         PyErr_SetString(PyExc_ZeroDivisionError, "WPM can not be set to 0");
         return NULL;
     }
-    
+
     pszText = malloc(MAX_SUBTITLE_TEXT_SIZE);
     if (NULL == pszText)
     {
         PyErr_SetString(PyExc_MemoryError, "Can not allocate memory for tmp buffer");
         return NULL;
     }
-    
-    retObj = PyDict_New();  
-    
+
+    retObj = PyDict_New();
+
     if ( 0 != VLC_SubtitleDemuxOpen( inputStr, i_microsecperframe, &p_sys ) || NULL == p_sys )
     {
         free(pszText);
         return retObj;
     }
-    
+
     if (0 != b_setEndTime)
     {
         for (i=0; i<p_sys->i_subtitles; ++i)
@@ -139,19 +139,19 @@ static PyObject * _subparser_parse(PyObject *self, PyObject *args)
             /* Fix previous item's end time if needed */
             if (i > 0 && 0 > p_sys->subtitle[i-1].i_stop)
             {
-                /* Calculate end time based on "Subtitle reading speeds in different languages:" -> 
+                /* Calculate end time based on "Subtitle reading speeds in different languages:" ->
                  * http://www.raco.cat/index.php/QuadernsTraduccio/article/viewFile/265461/353045
                  */
                 /* calc end time based on CPS (characters per second) */
-                const int64_t timeBasedOnCPS = (strlen(p_sys->subtitle[i-1].psz_text) * 1000000) / i_CPS; 
+                const int64_t timeBasedOnCPS = (strlen(p_sys->subtitle[i-1].psz_text) * 1000000) / i_CPS;
                 /* calc end time based on WPM (Words per minute) */
-                const int64_t timeBasedOnWPM = (words(p_sys->subtitle[i-1].psz_text) * 60000000) / i_WPM ; 
+                const int64_t timeBasedOnWPM = (words(p_sys->subtitle[i-1].psz_text) * 60000000) / i_WPM ;
                 int64_t time = timeBasedOnCPS > timeBasedOnWPM ? timeBasedOnCPS : timeBasedOnWPM;
                 if (time < 1500000) /* at least 1,5s */
                 {
                     time = 1500000;
                 }
-                
+
                 if ( (p_sys->subtitle[i-1].i_start + time) < p_sys->subtitle[i].i_start)
                 {
                     p_sys->subtitle[i-1].i_stop = p_sys->subtitle[i-1].i_start + time;
@@ -161,12 +161,12 @@ static PyObject * _subparser_parse(PyObject *self, PyObject *args)
                     p_sys->subtitle[i-1].i_stop = p_sys->subtitle[i].i_start - 10000; /* end 10ms before next subtitles */
                 }
             }
-            
+
             /* Fix last subtitle */
             if (i == (p_sys->i_subtitles - 1) && 0 > p_sys->subtitle[i].i_stop)
             {
-                const int64_t timeBasedOnCPS = (int64_t)(strlen(p_sys->subtitle[i].psz_text) * 1000000) / i_CPS; 
-                const int64_t timeBasedOnWPM = (int64_t)(words(p_sys->subtitle[i].psz_text) * 60000000) / i_WPM ; 
+                const int64_t timeBasedOnCPS = (int64_t)(strlen(p_sys->subtitle[i].psz_text) * 1000000) / i_CPS;
+                const int64_t timeBasedOnWPM = (int64_t)(words(p_sys->subtitle[i].psz_text) * 60000000) / i_WPM ;
                 int64_t time = timeBasedOnCPS > timeBasedOnWPM ? timeBasedOnCPS : timeBasedOnWPM;
                 if (time < 2000000) /* at least 2s */
                 {
@@ -176,11 +176,11 @@ static PyObject * _subparser_parse(PyObject *self, PyObject *args)
             }
         }
     }
-    
-    
+
+
     /* create list */
     list = PyList_New(p_sys->i_subtitles);
-    
+
     for (i=0; i<p_sys->i_subtitles; ++i)
     {
 
@@ -190,19 +190,19 @@ static PyObject * _subparser_parse(PyObject *self, PyObject *args)
     }
     free(pszText);
     pszText = NULL;
-    
+
     /* add created list to return dict */
     PyDict_SetItemString(retObj, "list", list);
     Py_DECREF(list); // PyDict_SetItemString not still reference but incement it
-    
+
     /* add subtitles format to return dict */
     /* elem = PyInt_FromLong((long) p_sys->i_type); */
     elem = PyString_FromString( p_sys->psz_type_name );
-    PyDict_SetItemString(retObj, "type", elem); 
+    PyDict_SetItemString(retObj, "type", elem);
     Py_DECREF(elem); // PyDict_SetItemString not still reference but incement it
-    
+
     VLC_SubtitleDemuxClose( p_sys );
-    
+
     return retObj;
 }
 
@@ -217,8 +217,8 @@ static PyMethodDef _subparserMethods[] = {
      " i_CPS - optional, default: 12 (characters per second - used for end time calculation if needed)\n"
      " i_WPM - optional, default: 138 (words per minute - used for end time calculation if needed)\n"
     },
-    {"version", (PyCFunction)get_version, METH_NOARGS, 
-     "return version (str) of the sub parser module\n\n" 
+    {"version", (PyCFunction)get_version, METH_NOARGS,
+     "return version (str) of the sub parser module\n\n"
     },
     {NULL,NULL,0,NULL}
 };

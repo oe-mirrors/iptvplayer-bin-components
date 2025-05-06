@@ -38,8 +38,8 @@ int g_terminated = 0;
 static void SigHandler (int signum)
 {
    // Ignore it so that another Ctrl-C doesn't appear any soon
-   signal(signum, SIG_IGN); 
-   
+   signal(signum, SIG_IGN);
+
    int ret = backend_stop();
    fprintf(stderr, "{\"PLAYBACK_STOP\":{\"sts\":%d, \"ctrl-c\":1}}\n", ret);
    g_terminated = 1;
@@ -50,7 +50,7 @@ static int WaitForCommand()
 {
     struct timeval tv;
     int nfds = 1;
-    
+
     fd_set read_fd;
     tv.tv_sec  = 1;
     tv.tv_usec = 0;
@@ -93,19 +93,19 @@ static void InitInOut()
     static char buff_stdout[2048];
     memset( buff_stderr, '\0', sizeof(buff_stderr));
     memset( buff_stdout, '\0', sizeof(buff_stdout));
-    
+
     setvbuf(stderr, buff_stderr, _IOLBF, sizeof(buff_stderr));
     setvbuf(stdout, buff_stdout, _IOLBF, sizeof(buff_stdout));
-    
-    // Make fgets not blocking 
-    int flags = fcntl(stdin->_fileno, F_GETFL, 0); 
-    fcntl(stdin->_fileno, F_SETFL, flags | O_NONBLOCK); 
-    
+
+    // Make fgets not blocking
+    int flags = fcntl(stdin->_fileno, F_GETFL, 0);
+    fcntl(stdin->_fileno, F_SETFL, flags | O_NONBLOCK);
+
     /* Make read and write ends of g_pfd nonblocking */
     pipe(g_pfd);
     flags = fcntl(g_pfd[0], F_GETFL);
     fcntl(g_pfd[0], F_SETFL, flags | O_NONBLOCK); /* Make read end nonblocking */
-    
+
     flags = fcntl(g_pfd[1], F_GETFL);
     fcntl(g_pfd[1], F_SETFL, flags | O_NONBLOCK); /* Make write end nonblocking */
 }
@@ -155,16 +155,16 @@ static StrPair_t **AddHeader(StrPair_t **vector, const char *headerString)
 static int HandleTracks(const char *argvBuff)
 {
     int commandRetVal = 0;
-    
-    switch (argvBuff[1]) 
+
+    switch (argvBuff[1])
     {
-        case 'l': 
+        case 'l':
         {
             int num = 0;
             TrackDescription_t *TrackList = backend_get_tracks_list(argvBuff[0], &num);
             break;
         }
-        case 'c': 
+        case 'c':
         {
             TrackDescription_t *track = backend_get_current_track(argvBuff[0]);
             break;
@@ -185,11 +185,11 @@ static int HandleTracks(const char *argvBuff)
             break;
         }
     }
-    
+
     return commandRetVal;
 }
 
-int main(int argc,char* argv[]) 
+int main(int argc,char* argv[])
 {
     char argvBuff[1024];
     memset(argvBuff, '\0', sizeof(argvBuff));
@@ -299,9 +299,9 @@ int main(int argc,char* argv[])
                 HandleTracks(cmd);
                 audioTrackIdx = -1;
             }
-            
+
             backend_gst_poll();
- 
+
             /* We made fgets non blocking, so it will return immediately when there is nothing to read */
             if( NULL == fgets(argvBuff, sizeof(argvBuff)-1 , stdin) )
             {
@@ -314,7 +314,7 @@ int main(int argc,char* argv[])
             {
                 continue;
             }
-            
+
             switch(argvBuff[0])
             {
             case 'v':
@@ -354,7 +354,7 @@ int main(int argc,char* argv[])
                 fprintf(stderr, "{\"PLAYBACK_FASTFORWARD\":{\"speed\":%d, \"sts\":%d}}\n", speed, commandRetVal);
                 break;
             }
-            case 'b': 
+            case 'b':
             {
             }
             case 'g':
@@ -364,7 +364,7 @@ int main(int argc,char* argv[])
                 int lengthInt  = 0;
                 double seconds = 0.0;
                 unsigned char force = ('f' == argvBuff[1]) ? 1 : 0; // f - force, c - check
-                
+
                 sscanf(argvBuff+2, "%d", &gotoPos);
                 if(0 <= gotoPos || force)
                 {
@@ -379,14 +379,14 @@ int main(int argc,char* argv[])
                         {
                             seconds = lengthInt - 10;
                         }
-                        
+
                         commandRetVal = backend_seek_absolute(seconds);
                         fprintf(stderr, "{\"PLAYBACK_SEEK_ABS\":{\"sec\":%f, \"sts\":%d}}\n", seconds, commandRetVal);
                     }
                 }
                 break;
             }
-            case 'k': 
+            case 'k':
             {
                 int seek = 0;
                 double length = 0;
@@ -394,9 +394,9 @@ int main(int argc,char* argv[])
                 double seconds = 0;
                 int64_t currentMSec = 0;
                 unsigned char force = ('f' == argvBuff[1]) ? 1 : 0; // f - force, c - check
-                
+
                 sscanf(argvBuff+2, "%d", &seek);
-                
+
                 commandRetVal = backend_query_position(&currentMSec);
                 if(0 == commandRetVal)
                 {
@@ -405,10 +405,10 @@ int main(int argc,char* argv[])
                 if(0 == commandRetVal || force)
                 {
                     int CurrentSec = (int) (currentMSec/1000);
-                    
+
                     commandRetVal = backend_query_duration(&length);
                     fprintf(stderr, "{\"PLAYBACK_LENGTH\":{\"length\":%lf, \"sts\":%d}}\n", length, commandRetVal);
-                    
+
                     lengthInt = (int)length;
                     if(10 <= lengthInt || force )
                     {
@@ -435,7 +435,7 @@ int main(int argc,char* argv[])
                 }
                 break;
             }
-            case 'l': 
+            case 'l':
             {
                 /*
                 double length = 0;
@@ -444,7 +444,7 @@ int main(int argc,char* argv[])
                 */
                 break;
             }
-            case 'j': 
+            case 'j':
             {
                 int64_t currentMSec = 0;
                 commandRetVal = backend_query_position(&currentMSec);
@@ -477,7 +477,7 @@ int main(int argc,char* argv[])
                 }
                 break;
             }
-            default: 
+            default:
             {
                 break;
             }
@@ -488,9 +488,9 @@ int main(int argc,char* argv[])
     {
         retCode = -10;
     }
-    
+
     backend_deinit();
-    
+
     if(-1 < g_pfd[0])
     {
         close(g_pfd[0]);
@@ -499,7 +499,7 @@ int main(int argc,char* argv[])
     {
         close(g_pfd[1]);
     }
-    
+
     if(pHeaderFields)
     {
         g_free(filename);
@@ -513,6 +513,6 @@ int main(int argc,char* argv[])
             /* this is not need, memory will be free by the system, after process exit */
         }
     }
-    
+
     exit(retCode);
 }

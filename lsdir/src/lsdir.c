@@ -119,10 +119,10 @@ int main(int argc, char *argv[])
     char iType = '\0';
     char lType = '\0';
     char *mainDir = malloc((1 < argc) ? strlen(argv[1]) + 1 : 2);
-    char *tmpName = malloc(PATH_MAX); 
+    char *tmpName = malloc(PATH_MAX);
     char listTypes[9] = "rdfslbc";
     char listLinkTypes[9] = "rdfsbc";
-    
+
     unsigned int iStart  = 0;
     unsigned int iEnd    = (unsigned int)(-1);
     unsigned int iCurr   = 0;
@@ -131,12 +131,12 @@ int main(int argc, char *argv[])
     unsigned int fWildcardsLen = 0;
     unsigned int dWildcardsLen = 0;
     unsigned int bWithSize = 0;
-    
+
     if(!mainDir || !tmpName)
     {
         handle_error("malloc");
     }
-    
+
     if(1 < argc)
     {
         strcpy(mainDir, argv[1]);
@@ -145,7 +145,7 @@ int main(int argc, char *argv[])
     {
         strcpy(mainDir, ".");
     }
-    
+
     if(2 < argc)
     {
         strncpy(listTypes, argv[2], sizeof(listTypes) - 1);
@@ -185,7 +185,7 @@ int main(int argc, char *argv[])
     {
         sscanf(argv[8], "%u", &bWithSize);
     }
-    
+
     /*
     fd = open(mainDir, O_RDONLY | O_DIRECTORY);
     if(-1 == fd)
@@ -206,7 +206,7 @@ int main(int argc, char *argv[])
         {
            break;
         }
-        
+
         /*
         nRead = syscall(SYS_getdents64, fd, buffer, BUF_SIZE);
         //nRead = getdents64(fd, buffer, BUF_SIZE);
@@ -225,7 +225,7 @@ int main(int argc, char *argv[])
         {
             /*
             pDir = (struct linux_dirent64 *) (buffer + bPos);
-            // printf("%8ld  ", pDir->d_ino); 
+            // printf("%8ld  ", pDir->d_ino);
             dType = *(buffer + bPos + pDir->d_reclen - 1);
             */
             dType = pDir->d_type;
@@ -256,14 +256,14 @@ int main(int argc, char *argv[])
                     iType = '\0';
                 break;
             }
-            
+
             off_t totalFileSizeInBytes = -1;
             snprintf(tmpName, PATH_MAX, "%s/%s", mainDir, pDir->d_name);
             if('\0' == iType || ('l' != iType && bWithSize))
             {
                 iType = GetItemType(tmpName, 0, &totalFileSizeInBytes);
             }
-            
+
             if('l' == iType )
             {
                 lType = GetItemType(tmpName, 1, &totalFileSizeInBytes);
@@ -273,7 +273,7 @@ int main(int argc, char *argv[])
             {
                 if('l' == iType)
                 {
-                    if('\0' != lType && 0 != strchr(listLinkTypes, lType)  && 
+                    if('\0' != lType && 0 != strchr(listLinkTypes, lType)  &&
                        0 == MatchWildcards(pDir->d_name, ('d' == lType) ? dWildcards : fWildcards, ('d' == lType) ? dWildcardsLen : fWildcardsLen))
                     {
                         if(iCurr >= iStart)
@@ -303,7 +303,7 @@ int main(int argc, char *argv[])
                 }
             }
             bPos += pDir->d_reclen;
-            
+
             if(iCurr >= iEnd)
             {
                 break;

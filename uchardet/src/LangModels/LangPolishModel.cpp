@@ -39,7 +39,7 @@
 
 /*
 // DEFINED BY MY BUT COUSE PROBLEMS
-static const unsigned char polish_iso_8859_2CharToOrderMap[] = 
+static const unsigned char polish_iso_8859_2CharToOrderMap[] =
 {
 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
@@ -59,7 +59,7 @@ static const unsigned char polish_iso_8859_2CharToOrderMap[] =
 255,  31, 255,  26, 255, 255, 255, 253, 255, 255, 255, 255, 255, 255, 255, 253
 };
 
-static const unsigned char polish_win1250CharToOrderMap[] = 
+static const unsigned char polish_win1250CharToOrderMap[] =
 {
 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
@@ -80,7 +80,7 @@ static const unsigned char polish_win1250CharToOrderMap[] =
 };
 */
 
-static const unsigned char polish_iso_8859_2CharToOrderMap[] = 
+static const unsigned char polish_iso_8859_2CharToOrderMap[] =
 {
 255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
 255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
@@ -100,7 +100,7 @@ static const unsigned char polish_iso_8859_2CharToOrderMap[] =
  94, 36, 93, 28, 92, 91, 75, 90, 89, 88, 87, 86, 72, 85, 84, 83,
 };
 
-static const unsigned char polish_win1250CharToOrderMap[] = 
+static const unsigned char polish_win1250CharToOrderMap[] =
 {
 255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
 255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
@@ -145,7 +145,7 @@ static const unsigned char polish_win1250CharToOrderMap[] =
 */
 
 
-static const PRUint8 polishLangModel[] = 
+static const PRUint8 polishLangModel[] =
 {
 2,2,2,2,3,3,3,3,3,2,3,3,3,3,3,3,3,3,3,3,3,0,3,0,3,2,3,0,3,0,0,0,
 0,0,0,3,0,0,0,0,0,0,0,3,0,0,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -277,7 +277,7 @@ static const PRUint8 polishLangModel[] =
 0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
 
-const SequenceModel Iso_8859_2PolishModel = 
+const SequenceModel Iso_8859_2PolishModel =
 {
   polish_iso_8859_2CharToOrderMap,
   polishLangModel,
@@ -287,7 +287,7 @@ const SequenceModel Iso_8859_2PolishModel =
   "iso-8859-2"
 };
 
-const SequenceModel Windows_1250PolishModel = 
+const SequenceModel Windows_1250PolishModel =
 {
   polish_win1250CharToOrderMap,
   polishLangModel,

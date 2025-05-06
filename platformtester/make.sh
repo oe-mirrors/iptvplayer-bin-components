@@ -38,13 +38,13 @@ case "$PLATFORM" in
             export PATH=$BASE_PATH"i686-linux/usr/bin/arm-oe-linux-gnueabi/":$PATH
             export SYSROOT=$BASE_PATH"cube"
             export CROSS_COMPILE=$TOOLCHAIN_NAME"-"
-            
+
             build $CROSS_COMPILE "armv5t" " -mfloat-abi=softfp -mtune=cortex-a9 -mfpu=vfpv3-d16 -pipe --sysroot=$SYSROOT "
             ;;
         sh4)
             build "/opt/STM/STLinux-2.4/devkit/sh4/bin/sh4-linux-" "sh4"
             ;;
-         
+
         mipsel)
             build "/opt/cross/mipsel-unknown-linux-gnu/bin/mipsel-unknown-linux-gnu-" "mipsel"
             ;;
@@ -52,10 +52,10 @@ case "$PLATFORM" in
         mipsel_1)
             build "/opt/cross/mipsel-tuxbox-linux-gnu/bin/mipsel-tuxbox-linux-gnu-" "mipsel"
             ;;
-         
+
         i686)
             build "" "i686"
-            ;;         
+            ;;
         *)
             usage
             exit 1

@@ -40,7 +40,7 @@
 
 #define NUM_OF_CATEGORY 6
 
-#include "nscore.h" 
+#include "nscore.h"
 
 #define ENOUGH_REL_THRESHOLD  100
 #define MAX_REL_THRESHOLD     1000
@@ -59,10 +59,10 @@ public:
   {
     PRInt32 order;
 
-    //if we received enough data, stop here   
+    //if we received enough data, stop here
     if (mTotalRel > MAX_REL_THRESHOLD)   mDone = PR_TRUE;
     if (mDone)       return;
-     
+
     //Only 2-bytes characters are of our interest
     order = (aCharLen == 2) ? GetOrder(aStr) : -1;
     if (order != -1 && mLastCharOrder != -1)
@@ -91,7 +91,7 @@ protected:
 
   //Number of sequences needed to trigger detection
   PRUint32 mDataThreshold;
-  
+
   //The order of previous char
   PRInt32  mLastCharOrder;
 
@@ -113,8 +113,8 @@ protected:
   PRInt32 GetOrder(const char* str)
   {
     //We only interested in Hiragana, so first byte is '\202'
-    if (*str == '\202' && 
-          (unsigned char)*(str+1) >= (unsigned char)0x9f && 
+    if (*str == '\202' &&
+          (unsigned char)*(str+1) >= (unsigned char)0x9f &&
           (unsigned char)*(str+1) <= (unsigned char)0xf1)
       return (unsigned char)*(str+1) - (unsigned char)0x9f;
     return -1;

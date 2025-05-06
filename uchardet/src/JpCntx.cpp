@@ -39,8 +39,8 @@
 #include "JpCntx.h"
 
 //This is hiragana 2-char sequence table, the number in each cell represents its frequency category
-const PRUint8 jp2CharContext[83][83] = 
-{ 
+const PRUint8 jp2CharContext[83][83] =
+{
 { 0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1,},
 { 2,4,0,4,0,3,0,4,0,3,4,4,4,2,4,3,3,4,3,2,3,3,4,2,3,3,3,2,4,1,4,3,3,1,5,4,3,4,3,4,3,5,3,0,3,5,4,2,0,3,1,0,3,3,0,3,3,0,1,1,0,4,3,0,3,3,0,4,0,2,0,3,5,5,5,5,4,0,4,1,0,3,4,},
 { 0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,},
@@ -133,14 +133,14 @@ void JapaneseContextAnalysis::HandleData(const char* aBuf, PRUint32 aLen)
   PRUint32 charLen;
   PRInt32 order;
   PRUint32 i;
-  
+
   if (mDone)
     return;
 
   //The buffer we got is byte oriented, and a character may span in more than one
-  //buffers. In case the last one or two byte in last buffer is not complete, we 
+  //buffers. In case the last one or two byte in last buffer is not complete, we
   //record how many byte needed to complete that character and skip these bytes here.
-  //We can choose to record those bytes as well and analyse the character once it 
+  //We can choose to record those bytes as well and analyse the character once it
   //is complete, but since a character will not make much difference, by simply skipping
   //this character will simply our logic and improve performance.
   for (i = mNeedToSkipCharNum; i < aLen; )
@@ -151,7 +151,7 @@ void JapaneseContextAnalysis::HandleData(const char* aBuf, PRUint32 aLen)
       mNeedToSkipCharNum = i - aLen;
       mLastCharOrder = -1;
     }
-    else 
+    else
     {
       if (order != -1 && mLastCharOrder != -1)
       {
@@ -166,7 +166,7 @@ void JapaneseContextAnalysis::HandleData(const char* aBuf, PRUint32 aLen)
       mLastCharOrder = order;
     }
   }
-  
+
   return;
 }
 
@@ -187,7 +187,7 @@ float  JapaneseContextAnalysis::GetConfidence(void)
   //This is just one way to calculate confidence. It works well for me.
   if (mTotalRel > mDataThreshold)
     return ((float)(mTotalRel - mRelSample[0]))/mTotalRel;
-  else 
+  else
     return (float)DONT_KNOW;
 }
 

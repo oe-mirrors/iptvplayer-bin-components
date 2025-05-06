@@ -45,7 +45,7 @@ NUM: 0 - 9
 *****************************************************************/
 
 //Character Mapping Table:
-//this talbe is modified base on win1251BulgarianCharToOrderMap, so 
+//this talbe is modified base on win1251BulgarianCharToOrderMap, so
 //only number <64 is sure valid
 
 static const unsigned char Latin5_BulgarianCharToOrderMap[] =
@@ -88,13 +88,13 @@ SYM, 65, 69, 70, 66, 63, 68,112,103, 92,194,104, 95, 86, 87, 71,  //60
   7,  8,  5, 19, 29, 25, 22, 21, 27, 24, 17, 75, 52,SYM, 42, 16,  //f0
 };
 
-//Model Table: 
+//Model Table:
 //total sequences: 100%
 //first 512 sequences: 96.9392%
 //first 1024 sequences:3.0618%
 //rest  sequences:     0.2992%
-//negative sequences:  0.0020% 
-static const PRUint8 BulgarianLangModel[] = 
+//negative sequences:  0.0020%
+static const PRUint8 BulgarianLangModel[] =
 {
 0,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,3,3,3,3,3,3,3,3,2,3,3,3,3,3,
 3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,0,3,3,3,2,2,3,2,2,1,2,2,
@@ -226,7 +226,7 @@ static const PRUint8 BulgarianLangModel[] =
 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
 };
 
-const SequenceModel Latin5BulgarianModel = 
+const SequenceModel Latin5BulgarianModel =
 {
   Latin5_BulgarianCharToOrderMap,
   BulgarianLangModel,
@@ -236,7 +236,7 @@ const SequenceModel Latin5BulgarianModel =
   "ISO-8859-5"
 };
 
-const SequenceModel Win1251BulgarianModel = 
+const SequenceModel Win1251BulgarianModel =
 {
   win1251BulgarianCharToOrderMap,
   BulgarianLangModel,

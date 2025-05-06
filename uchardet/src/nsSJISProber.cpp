@@ -44,7 +44,7 @@
 
 void  nsSJISProber::Reset(void)
 {
-  mCodingSM->Reset(); 
+  mCodingSM->Reset();
   mState = eDetecting;
   mContextAnalyser.Reset(mIsPreferredLanguage);
   mDistributionAnalyser.Reset(mIsPreferredLanguage);

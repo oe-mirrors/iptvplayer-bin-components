@@ -176,7 +176,7 @@ static int SelectAudioTrack(unsigned int i)
     {
         int validposition = 0;
         int64_t ppos = 0;
-        
+
         if (0 == backend_query_position(&ppos))
         {
             validposition = 1;
@@ -223,7 +223,7 @@ static void FillAudioTracks()
     gint n_audio = 0;
 
     g_object_get(g_gst_playbin, "n-audio", &n_audio, NULL);
-    
+
     //m_audioStreams.clear();
     if (NULL != g_audio_tracks)
     {
@@ -238,7 +238,7 @@ static void FillAudioTracks()
 
     g_audio_tracks = malloc(sizeof(TrackDescription_t) * n_audio);
     memset(g_audio_tracks, 0, sizeof(TrackDescription_t) * n_audio);
-    
+
     int j = 0;
     for (i = 0; i < n_audio; i++)
     {
@@ -258,12 +258,12 @@ static void FillAudioTracks()
         }
         GstStructure* str = gst_caps_get_structure(caps, 0);
         const gchar *g_type = gst_structure_get_name(str);
-        
+
         TrackDescription_t *track = &g_audio_tracks[j];
         track->Id = i;
         SetStr(&(track->Name), "und");
         SetStr(&(track->Encoding), (char *)g_type);
-        
+
         g_codec = NULL;
         g_lang = NULL;
         g_signal_emit_by_name (g_gst_playbin, "get-audio-tags", i, &tags);
@@ -291,11 +291,11 @@ static void FillAudioTracks()
     g_audio_num = j;
 }
 
-static void FillVideoTracks() 
-{ 
-    GstPad *videopad = NULL; 
-    int n_video = 0; 
-    int i = 0; 
+static void FillVideoTracks()
+{
+    GstPad *videopad = NULL;
+    int n_video = 0;
+    int i = 0;
     int j = 0;
     g_object_get(g_gst_playbin, "n-video", &n_video, NULL);
 
@@ -303,17 +303,17 @@ static void FillVideoTracks()
     {
         return;
     }
-    
-    if (n_video > 0) 
-    { 
+
+    if (n_video > 0)
+    {
         g_video_tracks = malloc(sizeof(TrackDescription_t) * n_video);
         memset(g_video_tracks, 0, sizeof(TrackDescription_t) * n_video);
-        
-        for (i = 0; i < n_video; i++) 
+
+        for (i = 0; i < n_video; i++)
         {
-            g_signal_emit_by_name(g_gst_playbin, "get-video-pad", i, &videopad); 
-            if (videopad) 
-            { 
+            g_signal_emit_by_name(g_gst_playbin, "get-video-pad", i, &videopad);
+            if (videopad)
+            {
 #if GST_VERSION_MAJOR < 1
                 GstCaps* caps = gst_pad_get_negotiated_caps(videopad);
 #else
@@ -321,19 +321,19 @@ static void FillVideoTracks()
 #endif
                 if (caps)
                 {
-                    GstStructure *str = gst_caps_get_structure (caps, 0); 
+                    GstStructure *str = gst_caps_get_structure (caps, 0);
                     if(str)
                     {
                         const gchar *g_type = gst_structure_get_name(str);
                         int num = 0;
                         int denom = 0;
-                        
+
                         TrackDescription_t *track = &g_video_tracks[j];
                         track->Id = i;
                         SetStr(&(track->Name), "und");
                         SetStr(&(track->Encoding), (char *)g_type);
-                        
-                        gst_structure_get_int(str, "width",  &track->width); 
+
+                        gst_structure_get_int(str, "width",  &track->width);
                         gst_structure_get_int(str, "height", &track->height);
                         if(gst_structure_get_fraction(str, "framerate", &num, &denom) && num > 0 && denom > 0)
                         {
@@ -348,7 +348,7 @@ static void FillVideoTracks()
                     }
                     gst_caps_unref(caps);
                 }
-                gst_object_unref (videopad); 
+                gst_object_unref (videopad);
             }
         }
         g_video_num = j;
@@ -482,12 +482,12 @@ TrackDescription_t* backend_get_tracks_list(const char type, int *num)
     {
         *num = localNum;
     }
-    
+
     if (NULL != pTracks)
     {
         int i = 0;
         fprintf(stderr, "{\"%c_l\": [", type);
-        for (i = 0; i < localNum; ++i) 
+        for (i = 0; i < localNum; ++i)
         {
             if(0 < i)
             {
@@ -497,8 +497,8 @@ TrackDescription_t* backend_get_tracks_list(const char type, int *num)
         }
         fprintf(stderr, "]}\n");
     }
-    
-    return pTracks; 
+
+    return pTracks;
 }
 
 TrackDescription_t* backend_get_current_track(const char type)
@@ -506,7 +506,7 @@ TrackDescription_t* backend_get_current_track(const char type)
     int idx = -1;
     int num = 0;
     TrackDescription_t *pTracks = NULL;
-    
+
     TrackDescription_t *track = NULL;
     if ('a' == type)
     {
@@ -526,7 +526,7 @@ TrackDescription_t* backend_get_current_track(const char type)
         idx     = GetCurrentTrack("current-video", &g_video_idx);
         num     = g_video_num;
     }
-    
+
     if (idx >= 0 && idx < num && NULL != pTracks)
     {
         track = &pTracks[idx];

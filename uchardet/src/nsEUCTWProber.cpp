@@ -39,7 +39,7 @@
 
 void  nsEUCTWProber::Reset(void)
 {
-  mCodingSM->Reset(); 
+  mCodingSM->Reset();
   mState = eDetecting;
   mDistributionAnalyser.Reset(mIsPreferredLanguage);
   //mContextAnalyser.Reset();

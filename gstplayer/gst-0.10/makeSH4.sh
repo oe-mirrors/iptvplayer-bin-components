@@ -26,4 +26,4 @@ mkdir sh4
 "$CROSS_COMPILE"gcc -g  -D PLATFORM_I686 $I0 $I1 $I2 $I3 $I4 $I5 $I6 *.c ../common/*.c -o sh4/gstplayer_gstreamer0.10 $L0 $L1 $L2 $L3 $L4 $L5 -Wfatal-errors -lgstreamer-0.10 -lgstbase-0.10 -lgstpbutils-0.10 -lgobject-2.0 -lgthread-2.0 -lglib-2.0 -lgmodule-2.0 -lxml2
 "$CROSS_COMPILE"strip -s sh4/gstplayer_gstreamer0.10
 
-    
+

@@ -26,7 +26,7 @@ I6="-I../common"
 LIBBASE=""
 L0=""
 L1=""
-L2="" 
+L2=""
 L3=""
 L4=""
 L5=""
@@ -36,4 +36,3 @@ mkdir armv7
 "$CROSS_COMPILE"gcc -D PLATFORM_MIPSEL -march=armv7-a -mfloat-abi=hard -mfpu=neon --sysroot="$SYSROOT" $I0 $I1 $I2 $I3 $I4 $I5 $I6 *.c ../common/*.c -o armv7/gstplayer_gstreamer0.10 $L0 $L1 $L2 $L3 $L4 $L5  -Wfatal-errors -lgstreamer-0.10 -lgstbase-0.10 -lgstpbutils-0.10 -lgobject-2.0 -lgthread-2.0 -lgmodule-2.0 -lxml2 -lglib-2.0
 "$CROSS_COMPILE"strip -s armv7/gstplayer_gstreamer0.10
 
-    

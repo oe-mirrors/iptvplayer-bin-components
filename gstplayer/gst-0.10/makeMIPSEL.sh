@@ -23,4 +23,3 @@ export PATH="/mnt/new/openpli40/openpli-oe-core/build/tmp/sysroots/i686-linux/us
 mipsel-oe-linux-gcc -D PLATFORM_MIPSEL -mel -mabi=32 -mhard-float -march=mips32 --sysroot="/mnt/new/openpli40/openpli-oe-core/build/tmp/sysroots/dm8000" $I0 $I1 $I2 $I3 $I4 $I5 $I6 *.c ../common/*.c -o mipsel/gstplayer_gstreamer0.10 $L0 $L1 $L2 $L3 $L4 $L5  -Wfatal-errors -lgstreamer-0.10 -lgstbase-0.10 -lgstpbutils-0.10 -lgobject-2.0 -lgthread-2.0 -lgmodule-2.0 -lxml2 -lglib-2.0
 mipsel-oe-linux-strip -s mipsel/gstplayer_gstreamer0.10
 
-    

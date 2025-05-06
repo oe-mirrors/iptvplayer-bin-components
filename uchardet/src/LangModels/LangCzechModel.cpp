@@ -37,7 +37,7 @@
 
 #include "../nsSBCharSetProber.h"
 
-static const unsigned char czech_iso_8859_2CharToOrderMap[] = 
+static const unsigned char czech_iso_8859_2CharToOrderMap[] =
 {
 255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
 255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
@@ -57,7 +57,7 @@ static const unsigned char czech_iso_8859_2CharToOrderMap[] =
  90, 89, 54, 66, 88, 87, 86, 85, 26, 31, 46, 84, 83, 30, 82, 81,
 };
 
-static const PRUint8 czechLangModel[] = 
+static const PRUint8 czechLangModel[] =
 {
 1,3,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,0,3,1,0,0,3,3,3,3,3,3,0,0,0,0,
 0,0,0,0,0,0,0,0,0,0,2,0,0,2,0,0,0,2,0,0,0,2,2,0,2,0,0,0,0,2,0,0,
@@ -189,7 +189,7 @@ static const PRUint8 czechLangModel[] =
 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
 
-const SequenceModel Iso_8859_2CzechModel = 
+const SequenceModel Iso_8859_2CzechModel =
 {
   czech_iso_8859_2CharToOrderMap,
   czechLangModel,

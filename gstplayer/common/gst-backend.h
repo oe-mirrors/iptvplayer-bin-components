@@ -38,21 +38,21 @@ typedef enum {
   GST_PLAY_FLAG_DEINTERLACE   = (1 << 9)
 } GstPlayFlags;
 
-typedef struct PlaybackInfo_s 
-{ 
+typedef struct PlaybackInfo_s
+{
     unsigned char isReady;
     unsigned char isPlaying;
     unsigned char isPaused;
     unsigned char isForwarding;
     unsigned char isSeeking;
     unsigned char isCreationPhase;
- 
+
     float BackWard;
     int   SlowMotion;
     int   Speed;
     int   AVSync;
     int   BufferingPercent;
-    
+
     unsigned char isVideo;
     unsigned char isAudio;
     unsigned char isSubtitle;
@@ -66,7 +66,7 @@ typedef struct StrPair_s
     char *pVal;
 }StrPair_t;
 
-typedef struct TrackDescription_s 
+typedef struct TrackDescription_s
 {
     int                   Id;
     char *                Name;
@@ -75,7 +75,7 @@ typedef struct TrackDescription_s
     int                   width;
     int                   height;
     int                   progressive;
-    
+
 } TrackDescription_t;
 
 void backend_init(int *argc, char **argv[], const int sfd);

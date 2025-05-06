@@ -16,7 +16,7 @@ static int ParseTimingValueTTML(int64_t *timing_value, const char *s)
     char fraction[4] = {'\0'};
     int factor = 0;
     int status = -1;
-    
+
     /* Try clock-time format */
     /* TODO: handle format hours:minutes:seconds:frames (e.g. "00:07:15:06") */
     /* hours:minutes:seconds.fraction (e.g. "00:07:15.25") */
@@ -27,12 +27,12 @@ static int ParseTimingValueTTML(int64_t *timing_value, const char *s)
             factor = factors[strnlen(fraction, sizeof(fraction)-1)-1];
             status = 0;
         }
-    } 
+    }
     else if (sscanf(s, "%2d:%2d:%2d", &h1, &m1, &s1) == 3)
     {
         status = 0;
     }
-    
+
     if (0 == status)
     {
         (*timing_value) = ( (int64_t)h1 * 3600 * 1000 +
@@ -40,7 +40,7 @@ static int ParseTimingValueTTML(int64_t *timing_value, const char *s)
                             (int64_t)s1 * 1000 +
                             (int64_t)d1 * factor ) * 1000;
     }
-    
+
     if (0 != status)
     {
         /* Try offset-time format */
@@ -51,7 +51,7 @@ static int ParseTimingValueTTML(int64_t *timing_value, const char *s)
             {
                 value *= 3600000;
                 status = 0;
-            } 
+            }
             else if (0 == strncmp(fraction, "m", sizeof(fraction)))
             {
                 value *= 60000;
@@ -67,14 +67,14 @@ static int ParseTimingValueTTML(int64_t *timing_value, const char *s)
                 status = 0;
             }
             /* TODO: add support for "f" (frames), "t" (ticks) metric */
-            
+
             if (0 == status)
             {
                 (*timing_value) = (int64_t)(value) * 1000;
             }
         }
     }
-    
+
     return status;
 }
 
@@ -93,18 +93,18 @@ static void XMLCALL StartElementTTML(void *userData, const char *name, const cha
     {
         return;
     }
-    
+
     if (0 == tagnamecmp(name, "p"))
     {
         p_sys->ttml.b_isParagraph = 1;
         p_sys->ttml.i_start = -1;
         p_sys->ttml.i_stop = -1;
     }
-    
+
     if (0 == tagnamecmp(name, "p") || 0 == tagnamecmp(name, "span"))
     {
         int i = 0;
-        for (i = 0; attr[i]; i += 2) 
+        for (i = 0; attr[i]; i += 2)
         {
             int64_t *timing = NULL;
             if (0 == strcmp("begin", attr[i]))
@@ -115,14 +115,14 @@ static void XMLCALL StartElementTTML(void *userData, const char *name, const cha
             {
                 timing = &(p_sys->ttml.i_stop);
             }
-            
+
             if (timing)
             {
                 ParseTimingValueTTML(timing, attr[i+1]);
             }
         }
     }
-    
+
     if (p_sys->ttml.b_isParagraph && 0 == tagnamecmp(name, "br"))
     {
         if (p_sys->ttml.p_text)
@@ -144,7 +144,7 @@ static void AddSubtitlesTTML(demux_sys_t *p_sys)
     {
         return;
     }
-    
+
     if( p_sys->i_subtitles >= p_sys->ttml.i_max )
     {
         p_sys->ttml.i_max += 500;
@@ -156,12 +156,12 @@ static void AddSubtitlesTTML(demux_sys_t *p_sys)
             return;
         }
     }
-    
+
     p_sys->subtitle[p_sys->i_subtitles].i_start  = p_sys->ttml.i_start >= 0 ? p_sys->ttml.i_start : 0;
     p_sys->subtitle[p_sys->i_subtitles].i_stop   = p_sys->ttml.i_stop >= 0 ? p_sys->ttml.i_stop : 0;
     p_sys->subtitle[p_sys->i_subtitles].psz_text = strdup(p_sys->ttml.p_text);
     p_sys->i_subtitles += 1;
-}  
+}
 
 
 static void XMLCALL DataElementTTML(void *userData, const char *content, int length)
@@ -171,14 +171,14 @@ static void XMLCALL DataElementTTML(void *userData, const char *content, int len
     {
         return;
     }
-    
+
     if (p_sys->ttml.b_isParagraph)
     {
         char *tmp = malloc(length+1);
         strncpy(tmp, content, length);
         tmp[length] = '\0';
         strtrim(tmp, "\n");
-        uint32_t newSize = strnlen(tmp, length); 
+        uint32_t newSize = strnlen(tmp, length);
         if (newSize)
         {
             if (p_sys->ttml.p_text)
@@ -208,7 +208,7 @@ static void XMLCALL EndElementTTML(void *userData, const char *name)
     {
         return;
     }
-    
+
     if (0 == tagnamecmp(name, "p"))
     {
         p_sys->ttml.b_isParagraph = 0;
@@ -241,7 +241,7 @@ int ReadSubtitltesTTML(demux_sys_t *p_sys, const char *buffer)
     p_sys->ttml.i_start = -1;
     p_sys->ttml.i_stop = -1;
     p_sys->ttml.b_isParagraph = false;
-    
+
     if (XML_Parse(parser, buffer, strlen(buffer), 1) == XML_STATUS_ERROR)
     {
         status = VLC_EGENERIC;

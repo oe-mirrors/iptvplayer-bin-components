@@ -16,12 +16,12 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-/* 
-Based on: 
+/*
+Based on:
 - https://github.com/sreerenjb/gstplayer/blob/master/gst-backend.c
 - https://github.com/OpenViX/enigma2/blob/master/lib/service/servicemp3.cpp
 */
- 
+
 #include "gst-backend.h"
 #include <unistd.h>
 #include <errno.h>
@@ -41,7 +41,7 @@ static GstSeekFlags g_seek_flags  = GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT
 #ifdef PLATFORM_I686
 static GstPlayFlags g_playbin_flags = ( GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_AUDIO );
 #else
-static GstPlayFlags g_playbin_flags = ( GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_AUDIO | GST_PLAY_FLAG_NATIVE_VIDEO); // 0x47 - GST_PLAY_FLAG_TEXT; 
+static GstPlayFlags g_playbin_flags = ( GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_AUDIO | GST_PLAY_FLAG_NATIVE_VIDEO); // 0x47 - GST_PLAY_FLAG_TEXT;
 #endif
 
 static PlaybackInfo_t g_playback_info;
@@ -130,7 +130,7 @@ static gint match_sinktype(const GValue *velement, const gchar *type)
 static void InfoStructChanged()
 {
     PlaybackInfo_t *ptrP = &g_playback_info;
-    
+
     fprintf(stderr, "{\"PLAYBACK_INFO\":{ \"isPlaying\":%s, \"isPaused\":%s, \"isForwarding\":%s, \"isSeeking\":%s, \"isCreationPhase\":%s,", \
     DUMP_BOOL(ptrP->isPlaying), DUMP_BOOL(ptrP->isPaused), DUMP_BOOL(ptrP->isForwarding), DUMP_BOOL(ptrP->isSeeking), DUMP_BOOL(ptrP->isCreationPhase) );
     fprintf(stderr, "\"BackWard\":%f, \"SlowMotion\":%d, \"Speed\":%d, \"AVSync\":%d,", ptrP->BackWard, ptrP->SlowMotion, ptrP->Speed, ptrP->AVSync);
@@ -147,7 +147,7 @@ static int ChangeSpeed(const gboolean result, const float fSpeed)
         g_playback_info.BackWard     = 0;
         g_playback_info.SlowMotion   = 0;
         g_playback_info.Speed        = 1;
-            
+
         int iSpeed = (int)fSpeed;
         int iRSpeed = (int) (1.0 / fSpeed);
         if(1 < iRSpeed)
@@ -165,7 +165,7 @@ static int ChangeSpeed(const gboolean result, const float fSpeed)
         {
             /* FASTBACKWARD */
             g_playback_info.BackWard     = iSpeed;
-            
+
         }
         else if(1 != iSpeed)
         {
@@ -176,7 +176,7 @@ static int ChangeSpeed(const gboolean result, const float fSpeed)
         InfoStructChanged();
         return 0;
     }
-    
+
     return -1;
 }
 
@@ -216,7 +216,7 @@ static void gstAboutToFinishCallback(GstElement* object, gpointer userdata)
     //g_playback_info.isPlaying = 0;
 
     /* There is no need to wake up sleep
-     * 1s delay is acceptable 
+     * 1s delay is acceptable
      */
 }
 
@@ -224,7 +224,7 @@ static void gsElementAddedCallback(GstBin *bin, GstElement *element, gpointer da
 {
 
     gchar *elementname = gst_element_get_name(element);
-    
+
     {
         if (g_str_has_prefix(elementname, "queue2"))
         {
@@ -256,10 +256,10 @@ static void gstSourceChangedCallback(GObject *object, GParamSpec *pspec, gpointe
     {
         return;
     }
-    
+
     GstElement* element = NULL;
     g_object_get(g_gst_playbin, "source", &element, NULL);
-    if (element) 
+    if (element)
     {
         // First check if the source element has a cookies property
         // of the format we expect
@@ -269,12 +269,12 @@ static void gstSourceChangedCallback(GObject *object, GParamSpec *pspec, gpointe
             gst_object_unref(element);
             return;
         }
-        
+
         if (g_object_class_find_property(G_OBJECT_GET_CLASS(element), "ssl-strict") != 0)
         {
             g_object_set(G_OBJECT(element), "ssl-strict", FALSE, NULL);
         }
-       
+
         StrPair_t **headerField = g_ptr_http_header_fields;
         while(*headerField)
         {
@@ -326,19 +326,19 @@ static GstBusSyncReply gstBusSyncHandler(GstBus *bus, GstMessage *message, gpoin
         write(g_sfd, "x", 1);   /* wake up main loop */
         errno = savedErrno;
     }
-    
+
     return GST_BUS_PASS;
 }
 
 static gboolean gstBusCall(GstBus *bus, GstMessage *msg)
-{     
+{
     switch (GST_MESSAGE_TYPE(msg))
     {
-    case GST_MESSAGE_TAG: 
+    case GST_MESSAGE_TAG:
     {
         break;
     }
-    case GST_MESSAGE_STATE_CHANGED: 
+    case GST_MESSAGE_STATE_CHANGED:
     {
         /* We are only interested in state-changed messages from the pipeline */
         if (GST_MESSAGE_SRC(msg) == GST_OBJECT(g_gst_playbin))
@@ -369,10 +369,10 @@ static gboolean gstBusCall(GstBus *bus, GstMessage *msg)
                     default:
                         break;
                 }
-                
+
 
                 GstStateChange transition = (GstStateChange)GST_STATE_TRANSITION(old_state, new_state);
-         
+
                 switch(transition)
                 {
                     case GST_STATE_CHANGE_NULL_TO_READY:
@@ -390,7 +390,7 @@ static gboolean gstBusCall(GstBus *bus, GstMessage *msg)
                             }
                             gst_iterator_free(children);
                         }
-                        
+
                         gst_element_set_state(g_gst_playbin, GST_STATE_PAUSED);
                         g_playback_info.isReady = 0;
                     }
@@ -429,13 +429,13 @@ static gboolean gstBusCall(GstBus *bus, GstMessage *msg)
                     }    break;
                     case GST_STATE_CHANGE_PAUSED_TO_PLAYING:
                     {
-         
+
                     }    break;
                     case GST_STATE_CHANGE_PLAYING_TO_PAUSED:
                     {
-            
+
                     }    break;
-                    case GST_STATE_CHANGE_PAUSED_TO_READY: 
+                    case GST_STATE_CHANGE_PAUSED_TO_READY:
                     {
                         if (g_dvbAudioSink)
                         {
@@ -472,10 +472,10 @@ static gboolean gstBusCall(GstBus *bus, GstMessage *msg)
             gst_message_parse_error(msg, &err, &debug);
             //fprintf(stderr, "Debug: %s\n", debug);
             g_free(debug);
-            
+
             fprintf(stderr, "{\"GST_ERROR\":{\"msg\":\"%s\",\"code\":%i}}\n", err->message, err->code);
             g_error_free(err);
-            
+
             g_playback_info.isPlaying = 0;
             InfoStructChanged();
             break;
@@ -491,7 +491,7 @@ static gboolean gstBusCall(GstBus *bus, GstMessage *msg)
         InfoStructChanged();
         backend_query_duration(NULL);
         backend_query_position(NULL);
-        
+
         if (0 == g_playback_info.isReady)
         {
             g_playback_info.isReady = 1;
@@ -501,8 +501,8 @@ static gboolean gstBusCall(GstBus *bus, GstMessage *msg)
             }
         }
         break;
-    } 
-    
+    }
+
     case GST_MESSAGE_ELEMENT:
     {
         if ( gst_is_missing_plugin_message(msg) )
@@ -594,7 +594,7 @@ static gboolean gstBusCall(GstBus *bus, GstMessage *msg)
 }
 
 void backend_gst_poll()
-{              
+{
     GstBus *bus = gst_pipeline_get_bus(GST_PIPELINE(g_gst_playbin));
     GstMessage *message = NULL;
     while((message = gst_bus_pop(bus)))
@@ -625,7 +625,7 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
     g_buffer_duration        = buffer_duration;
     g_buffer_size            = buffer_size;
     g_ptr_http_header_fields = http_header_fields;
-    
+
     GstPlayFlags flags = g_playbin_flags;
 
     g_gst_playbin = gst_element_factory_make("playbin", "gst-player"); //playbin
@@ -638,8 +638,8 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
             {
                 g_signal_connect(g_gst_playbin, "notify::source", G_CALLBACK(gstSourceChangedCallback), NULL);
             }
-            
-            
+
+
             if(0 < ring_buffer_max_size || 0 <= buffer_duration || 0 <= buffer_size)
             {
                 if(g_download_buffer_path && strlen(g_download_buffer_path) && ring_buffer_max_size)
@@ -703,7 +703,7 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
             if(g_iptv_download_timeout > 0)
             {
                 g_fileFd = open(filename, O_RDONLY);
-                
+
                 gchar *fduri = g_strdup_printf ("ifd://%d", g_fileFd);
                 g_object_set(G_OBJECT (g_gst_playbin), "uri", fduri, NULL);
                 g_free(fduri);
@@ -712,7 +712,7 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
             {
                 g_object_set(G_OBJECT (g_gst_playbin), "uri", uri, NULL);
             }
-            
+
             if (subtitles_enabled)
             {
                 g_subsink = gst_element_factory_make("subsink", NULL);
@@ -800,13 +800,13 @@ int backend_stop()
         }
 
     }
-    
+
     if (g_fileFd >= 0)
     {
         close(g_fileFd);
         g_fileFd = -1;
     }
-    
+
     memset(&g_playback_info, 0, sizeof(g_playback_info));
     InfoStructChanged();
     return ret;
@@ -844,7 +844,7 @@ int backend_resume()
             sts = -1;
         }
     }
-    
+
     if (sts == 0)
     {
         g_playback_info.isPaused = 0;
@@ -884,7 +884,7 @@ int backend_seek_absolute(const double seconds)
                                         g_seek_flags,
                                         GST_SEEK_TYPE_SET, time_nanoseconds,
                                         GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE );
-                   
+
 
     memset(&g_eos_fix, 0, sizeof(g_eos_fix));
     return ChangeSpeed(result, 1.0);
@@ -893,7 +893,7 @@ int backend_seek_absolute(const double seconds)
 int backend_set_speed(const float speed)
 {
     GstSeekFlags seek_flags = 1.0 == speed ? g_seek_flags : GST_SEEK_FLAG_NONE;
-    
+
     gboolean result = gst_element_seek( g_gst_playbin, speed,
                                         GST_FORMAT_TIME,
                                         seek_flags,
@@ -908,12 +908,12 @@ int backend_query_position(int64_t *mseconds)
     {
         *mseconds = 0;
     }
-    
+
     if (!g_gst_playbin || !g_playback_info.isPlaying)
     {
         return -1;
     }
-    
+
     gboolean result = FALSE;
     GstState st;
     GstStateChangeReturn res = gst_element_get_state(g_gst_playbin, &st, 0, 0);
@@ -924,7 +924,7 @@ int backend_query_position(int64_t *mseconds)
         GstFormat format    = GST_FORMAT_TIME;
         gint64 playbin_time = GST_CLOCK_TIME_NONE;
         gint64 decoder_time = GST_CLOCK_TIME_NONE;
-        
+
         result = gst_element_query_position(g_gst_playbin, format, &playbin_time);
         if(!result)
         {
@@ -942,9 +942,9 @@ int backend_query_position(int64_t *mseconds)
             /* EOS fix start */
             gint64 timestamp = getTimestamp();
             if(0 == g_eos_fix.check_timestamp) g_eos_fix.check_timestamp = timestamp;
-            
+
             //fprintf(stderr, "{d:%lld p:%lld}\n", decoder_time, playbin_time);
-            if(decoder_time  == g_eos_fix.decoder_time && 
+            if(decoder_time  == g_eos_fix.decoder_time &&
                playbin_time  == g_eos_fix.playbin_time )
             {
                 if(10000 < (timestamp-g_eos_fix.check_timestamp) )
@@ -964,7 +964,7 @@ int backend_query_position(int64_t *mseconds)
         {
             decoder_time = playbin_time;
         }
-        
+
         //fprintf(stderr, "{p:%lld result[%d]}\n", playbin_time, result);
         if (result && GST_FORMAT_TIME == format)
         {
@@ -973,7 +973,7 @@ int backend_query_position(int64_t *mseconds)
             {
                 /* validate time from decoder */
                 gint64 diff = (decoder_time > playbin_time) ? decoder_time - playbin_time : playbin_time - decoder_time;
-                if( GST_TIME_AS_SECONDS(diff) < 180) 
+                if( GST_TIME_AS_SECONDS(diff) < 180)
                 {
                     result = TRUE;
                     if(mseconds)
@@ -1017,7 +1017,7 @@ int backend_query_duration(double *length)
     else
     {
         *length = tmpLength;
-    }        
+    }
     return 0;
 }
 

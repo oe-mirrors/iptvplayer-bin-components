@@ -35,4 +35,3 @@ exit 0
 ./build/tmp/work/mips32el-oe-linux/gstreamer1.0/1.4.5-r0/packages-split/gstreamer1.0-dev/usr/include/gstreamer-1.0/gst/gst.h
 ./build/tmp/work/mips32el-oe-linux/gstreamer1.0/1.4.5-r0/gstreamer-1.4.5/gst/gst.h
 ./build/tmp/work/mips32el-oe-linux/gstreamer1.0/1.4.5-r0/license-destdir/gstreamer1.0/gst.h
-    

@@ -37,7 +37,7 @@
 
 #include "../nsSBCharSetProber.h"
 
-static const unsigned char swedish_WINDOWS_1252CharToOrderMap[] = 
+static const unsigned char swedish_WINDOWS_1252CharToOrderMap[] =
 {
 255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
 255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
@@ -57,7 +57,7 @@ static const unsigned char swedish_WINDOWS_1252CharToOrderMap[] =
  97, 96, 95, 94, 82, 93, 20, 92, 91, 90, 89, 75, 63, 88, 87, 86,
 };
 
-static const PRUint8 swedishLangModel[] = 
+static const PRUint8 swedishLangModel[] =
 {
 2,2,3,3,3,3,3,3,2,2,3,3,3,2,1,3,2,3,3,0,3,3,3,2,2,0,0,0,0,0,0,0,
 0,0,0,0,0,0,2,0,3,0,0,0,0,0,0,0,0,0,0,0,0,2,1,2,0,0,2,0,0,0,0,0,
@@ -189,7 +189,7 @@ static const PRUint8 swedishLangModel[] =
 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
 
-const SequenceModel Windows_1252SwedishModel = 
+const SequenceModel Windows_1252SwedishModel =
 {
   swedish_WINDOWS_1252CharToOrderMap,
   swedishLangModel,

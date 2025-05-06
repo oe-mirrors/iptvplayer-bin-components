@@ -105,7 +105,7 @@ enum
   PROP_FD,
   PROP_TIMEOUT,
   PROP_IS_LIVE,
-  
+
   PROP_LAST
 };
 
@@ -170,13 +170,13 @@ ifdsrc_class_init (GstIFDSrcClass * klass)
   g_object_class_install_property (gobject_class, PROP_FD,
       g_param_spec_int ("ifd", "ifd", "An open file descriptor to read from",
           0, G_MAXINT, DEFAULT_FD, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-          
+
    g_object_class_install_property (gobject_class, PROP_IS_LIVE,
          g_param_spec_boolean ("is_live",
         "Is live",
         "Is live stream (TRUE = live stream not seekable)",
         FALSE, G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE));
-  
+
   /**
    * GstIFDSrc:timeout
    *
@@ -249,7 +249,7 @@ ifdsrc_update_fd (GstIFDSrc * src, guint64 size)
 
     if (src->fd >= 0) {
       fd.fd = src->fd;
-      // this will log a harmless warning, if it was never added 
+      // this will log a harmless warning, if it was never added
       gst_poll_remove_fd (src->fdset, &fd);
     }
 
@@ -441,7 +441,7 @@ ifdsrc_create (GstPushSrc * psrc, GstBuffer ** outbuf)
 
   gst_buffer_map (buf, &info, GST_MAP_WRITE);
 
-  
+
   //do {
   //  readbytes = read (src->fd, info.data, blocksize);
   //  GST_LOG_OBJECT (src, "read %" G_GSSIZE_FORMAT, readbytes);
@@ -449,16 +449,16 @@ ifdsrc_create (GstPushSrc * psrc, GstBuffer ** outbuf)
   if (!src->seek_failed && src->timeout > 0)
   {
       guint64 timestamp = get_timestamp();
-      do 
+      do
       {
         try_again = FALSE;
 
         retval = gst_poll_wait (src->fdset, 10000*GST_USECOND);
         GST_LOG_OBJECT (src, "poll returned %d", retval);
 
-        if (G_UNLIKELY (retval == -1)) 
+        if (G_UNLIKELY (retval == -1))
         {
-          if (errno == EINTR || errno == EAGAIN) 
+          if (errno == EINTR || errno == EAGAIN)
           {
             /* retry if interrupted */
             try_again = TRUE;
@@ -466,13 +466,13 @@ ifdsrc_create (GstPushSrc * psrc, GstBuffer ** outbuf)
           else if (errno == EBUSY)
           {
             goto stopped;
-          } 
-          else 
+          }
+          else
           {
             goto poll_error;
           }
         }
-        else if (G_UNLIKELY (retval == 0)) 
+        else if (G_UNLIKELY (retval == 0))
         {
             if (!src->seek_failed)
             {
@@ -496,12 +496,12 @@ ifdsrc_create (GstPushSrc * psrc, GstBuffer ** outbuf)
         readbytes = read (src->fd, info.data, blocksize);
     } while(readbytes == -1 && errno == EINTR); /* retry if interrupted */
   }
-  
+
   if (src->seek_failed)
   {
     readbytes = 0;
   }
-  
+
   if (readbytes < 0)
     goto read_error;
 
@@ -641,13 +641,13 @@ ifdsrc_do_seek (GstBaseSrc * bsrc, GstSegment * segment)
   {
     return TRUE;
   }
-  
+
   if (src->is_live || (src->timeout > 0 && offset >= src->size))
   {
      src->seek_failed = TRUE;
      return TRUE;
   }
-  
+
   res = lseek (src->fd, offset, SEEK_SET);
   if (G_UNLIKELY (res < 0 || res != offset))
   {

@@ -70,13 +70,13 @@ ILL, 83, 52, 47, 46, 72, 32, 94,216,113,ILL,109,ILL,ILL,ILL,ILL,
  12, 19, 13, 26, 18, 27, 21, 17,  7, 10,  5,ILL,ILL,128, 96,ILL,
 };
 
-//Model Table: 
+//Model Table:
 //total sequences: 100%
 //first 512 sequences: 98.4004%
 //first 1024 sequences: 1.5981%
 //rest  sequences:      0.087%
-//negative sequences:   0.0015% 
-static const PRUint8 HebrewLangModel[] = 
+//negative sequences:   0.0015%
+static const PRUint8 HebrewLangModel[] =
 {
 0,3,3,3,3,3,3,3,3,3,3,2,3,3,3,3,3,3,3,3,3,3,3,2,3,2,1,2,0,1,0,0,
 3,0,3,1,0,0,1,3,2,0,1,1,2,0,2,2,2,1,1,1,1,2,1,1,1,2,0,0,2,2,0,1,
@@ -208,7 +208,7 @@ static const PRUint8 HebrewLangModel[] =
 0,0,0,0,0,0,0,0,0,0,1,2,1,0,0,0,0,0,1,1,1,1,1,0,1,0,0,0,1,1,0,0,
 };
 
-const SequenceModel Win1255Model = 
+const SequenceModel Win1255Model =
 {
   win1255_CharToOrderMap,
   HebrewLangModel,

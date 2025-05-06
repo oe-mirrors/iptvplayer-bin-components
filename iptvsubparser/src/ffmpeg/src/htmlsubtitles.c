@@ -90,9 +90,9 @@ void ff_htmlmarkup_to_ass(void *log_ctx, char *dst, const char *in)
     strcpy(stack[0].param[PARAM_COLOR], "{\\c}");
     strcpy(stack[0].param[PARAM_FACE],  "{\\fn}");
 
-    for (; !end && *in; in++) 
+    for (; !end && *in; in++)
     {
-        switch (*in) 
+        switch (*in)
         {
         case '\r':
             break;
@@ -118,7 +118,7 @@ void ff_htmlmarkup_to_ass(void *log_ctx, char *dst, const char *in)
                 (len = 0, sscanf(in, "{%*1[CcFfoPSsYy]:%*[^}]}%n", &len) >= 0 && len > 0))
             {
                 in += len - 1;
-            } 
+            }
             else
             {
                 dst[dstIdx++] = *in;
@@ -138,23 +138,23 @@ void ff_htmlmarkup_to_ass(void *log_ctx, char *dst, const char *in)
                 {
                     *param++ = 0;
                 }
-                
+
                 if ((!tag_close && sptr < FF_ARRAY_ELEMS(stack)) ||
-                    ( tag_close && sptr > 0 && !strcmp(stack[sptr-1].tag, tagname))) 
+                    ( tag_close && sptr > 0 && !strcmp(stack[sptr-1].tag, tagname)))
                 {
                     /*
                     int i;
                     int j;
-                    */                    
+                    */
                     int unknown = 0;
                     in += len + tag_close;
                     if (!tag_close)
                     {
                         memset(stack+sptr, 0, sizeof(*stack));
                     }
-                    if (!strcmp(tagname, "font")) 
+                    if (!strcmp(tagname, "font"))
                     {
-                        if (tag_close) 
+                        if (tag_close)
                         {
                             ;
                             /*
@@ -164,7 +164,7 @@ void ff_htmlmarkup_to_ass(void *log_ctx, char *dst, const char *in)
                                 {
                                     for (j=sptr-2; j>=0; j--)
                                     {
-                                        if (stack[j].param[i][0]) 
+                                        if (stack[j].param[i][0])
                                         {
                                             av_bprintf(dst, "%s", stack[j].param[i]);
                                             break;
@@ -173,7 +173,7 @@ void ff_htmlmarkup_to_ass(void *log_ctx, char *dst, const char *in)
                                 }
                             }
                             */
-                        } 
+                        }
                         else
                         {
                             while (param)
@@ -188,7 +188,7 @@ void ff_htmlmarkup_to_ass(void *log_ctx, char *dst, const char *in)
                                              sizeof(stack[0].param[PARAM_SIZE]),
                                              "{\\fs%u}", font_size);
                                     }
-                                } 
+                                }
                                 else if (!strncmp(param, "color=", 6))
                                 {
                                     param += 6 + (param[6] == '"');
@@ -224,12 +224,12 @@ void ff_htmlmarkup_to_ass(void *log_ctx, char *dst, const char *in)
                             }
                             */
                         }
-                    } 
+                    }
                     else if (!tagname[1] && strspn(tagname, "bisu") == 1)
                     {
                         ; /*av_bprintf(dst, "{\\%c%d}", tagname[0], !tag_close);*/
                     }
-                    else 
+                    else
                     {
                         unknown = 1;
                         ; /*snprintf(tmp, sizeof(tmp), "</%s>", tagname);*/
@@ -242,7 +242,7 @@ void ff_htmlmarkup_to_ass(void *log_ctx, char *dst, const char *in)
                     {
                         in -= len + tag_close;
                         dst[dstIdx++] = *in;
-                    } 
+                    }
                     else
                     {
                         av_strlcpy(stack[sptr++].tag, tagname,
@@ -265,7 +265,7 @@ void ff_htmlmarkup_to_ass(void *log_ctx, char *dst, const char *in)
     {
         dstIdx -= 2;
     }
-    
+
     dst[dstIdx] = 0;
     rstrip_spaces_buf(dst);
 }

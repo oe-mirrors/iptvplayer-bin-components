@@ -80,7 +80,7 @@ typedef struct
 
 class nsSingleByteCharSetProber : public nsCharSetProber{
 public:
-  nsSingleByteCharSetProber(const SequenceModel *model) 
+  nsSingleByteCharSetProber(const SequenceModel *model)
     :mModel(model), mReversed(PR_FALSE), mNameProber(0) { Reset(); }
   nsSingleByteCharSetProber(const SequenceModel *model, PRBool reversed, nsCharSetProber* nameProber)
     :mModel(model), mReversed(reversed), mNameProber(nameProber) { Reset(); }
@@ -91,7 +91,7 @@ public:
   virtual void      Reset(void);
   virtual float     GetConfidence(void);
   virtual void      SetOpion() {}
-  
+
   // This feature is not implemented yet. any current language model
   // contain this parameter as PR_FALSE. No one is looking at this
   // parameter or calling this method.
@@ -119,9 +119,9 @@ protected:
   PRUint32 mCtrlChar;
   //characters that fall in our sampling range
   PRUint32 mFreqChar;
-  
+
   // Optional auxiliary prober for name decision. created and destroyed by the GroupProber
-  nsCharSetProber* mNameProber; 
+  nsCharSetProber* mNameProber;
 
 };
 
