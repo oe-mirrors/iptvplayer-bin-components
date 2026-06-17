@@ -31,6 +31,7 @@ Based on:
 #include <stdio.h>
 #include <sys/types.h>
 #include <fcntl.h>
+#include <ctype.h>
 
 static GstElement *g_gst_playbin = NULL;
 static GstElement *g_dvbAudioSink   = NULL;
@@ -610,6 +611,100 @@ const PlaybackInfo_t* backend_get_playback_info()
     return &g_playback_info;
 }
 
+static gboolean isDashUri(const gchar* uri)
+{
+    if (!uri) return FALSE;
+    gchar *lower = g_ascii_strdown(uri, -1);
+    gboolean is_dash = (strstr(lower, ".mpd") != NULL) ||
+                       (strstr(lower, "manifest.mpd") != NULL) ||
+                       (strstr(lower, "application/dash+xml") != NULL);
+    g_free(lower);
+    return is_dash;
+}
+
+static gchar* gstLaunchQuote(const gchar* value)
+{
+    GString *s = g_string_new("\"");
+    for (const gchar *p = value; *p; ++p) {
+        if (*p == '\\' || *p == '"') g_string_append_c(s, '\\');
+        g_string_append_c(s, *p);
+    }
+    g_string_append_c(s, '"');
+    return g_string_free(s, FALSE);
+}
+
+static void gstSetBoolIfAvailable(GstElement* element, const gchar* property, gboolean value)
+{
+    if (!element || !property) return;
+    if (g_object_class_find_property(G_OBJECT_GET_CLASS(element), property))
+        g_object_set(G_OBJECT(element), property, value, NULL);
+}
+
+static void gstSetStringIfAvailable(GstElement* element, const gchar* property, const gchar* value)
+{
+    if (!element || !property || !value || !*value) return;
+    if (g_object_class_find_property(G_OBJECT_GET_CLASS(element), property))
+        g_object_set(G_OBJECT(element), property, value, NULL);
+}
+
+/* AML boxes don't ship dvbmediasink; probe + fall back. */
+static const gchar* pickFactory(const gchar *caller_choice, const gchar *aml_name, const gchar *dvb_name)
+{
+    if (caller_choice && *caller_choice) return caller_choice;
+    GstElementFactory *f = gst_element_factory_find(aml_name);
+    if (f) { gst_object_unref(f); return aml_name; }
+    return dvb_name;
+}
+
+static GstElement* createDashPlaybackPipeline(const gchar* uri, const gchar *videosink, const gchar *audiosink)
+{
+    const gchar *vsink_factory = pickFactory(videosink, "dreamvideosink", "dvbvideosink");
+    const gchar *asink_factory = pickFactory(audiosink, "dreamaudiosink", "dvbaudiosink");
+    gchar *quoted_uri = gstLaunchQuote(uri);
+    gchar *pipeline = g_strdup_printf(
+        "souphttpsrc name=dashsrc location=%s timeout=60 retries=20 "
+        "! dashdemux name=d connection-speed=4000 max-bitrate=3200000 "
+        "max-video-width=1280 max-video-height=720 max-video-framerate=50/1 "
+        "presentation-delay=6s "
+        "d.video_00 ! queue max-size-buffers=0 max-size-bytes=4194304 max-size-time=5000000000 "
+        "! qtdemux ! h264parse "
+        "! video/x-h264,stream-format=avc,alignment=au "
+        "! %s name=dashvideosink "
+        "d.audio_00 ! queue max-size-buffers=0 max-size-bytes=1048576 max-size-time=5000000000 "
+        "! qtdemux ! aacparse "
+        "! audio/mpeg,mpegversion=4,framed=true,stream-format=raw "
+        "! %s name=dashaudiosink",
+        quoted_uri, vsink_factory, asink_factory);
+    g_free(quoted_uri);
+
+    GError *err = NULL;
+    GstElement *element = gst_parse_launch(pipeline, &err);
+    g_free(pipeline);
+    if (!element) {
+        g_warning("[gstplayer2] DASH pipeline parse failed: %s", err ? err->message : "unknown");
+        if (err) g_error_free(err);
+        return NULL;
+    }
+    if (err) {
+        g_warning("[gstplayer2] DASH pipeline parse warning: %s", err->message);
+        g_error_free(err);
+    }
+    /* e2-sync/e2-async no-ops on dream*sinks (property missing). */
+    GstElement *vsink = gst_bin_get_by_name(GST_BIN(element), "dashvideosink");
+    if (vsink) {
+        gstSetBoolIfAvailable(vsink, "e2-sync",  FALSE);
+        gstSetBoolIfAvailable(vsink, "e2-async", FALSE);
+        gst_object_unref(vsink);
+    }
+    GstElement *asink = gst_bin_get_by_name(GST_BIN(element), "dashaudiosink");
+    if (asink) {
+        gstSetBoolIfAvailable(asink, "e2-sync",  FALSE);
+        gstSetBoolIfAvailable(asink, "e2-async", FALSE);
+        gst_object_unref(asink);
+    }
+    return element;
+}
+
 void backend_init(int *argc, char **argv[], const int sfd)
 {
     g_sfd = sfd;
@@ -627,6 +722,25 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
     g_ptr_http_header_fields = http_header_fields;
 
     GstPlayFlags flags = g_playbin_flags;
+
+    /* playbin auto-plug stalls the HW video sink on MPEG-DASH/fMP4
+     * (pts_video freezes after preroll). Build an explicit pipeline. */
+    if (isDashUri(filename))
+    {
+        g_gst_playbin = createDashPlaybackPipeline(filename, videosink, audiosink);
+        if (!g_gst_playbin) return -1;
+        GstBus *bus = gst_pipeline_get_bus(GST_PIPELINE(g_gst_playbin));
+        gst_bus_set_sync_handler(bus, gstBusSyncHandler, NULL, NULL);
+        gst_object_unref(bus);
+        gst_element_set_state(g_gst_playbin, GST_STATE_PAUSED);
+        g_playback_info.isReady          = 0;
+        g_playback_info.isPlaying        = 1;
+        g_playback_info.isPaused         = 0;
+        g_playback_info.BufferingPercent = -1;
+        ChangeSpeed(TRUE, 1.0);
+        InfoStructChanged();
+        return 0;
+    }
 
     g_gst_playbin = gst_element_factory_make("playbin", "gst-player"); //playbin
     if(g_gst_playbin)
