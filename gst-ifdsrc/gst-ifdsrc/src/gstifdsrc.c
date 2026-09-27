@@ -789,7 +789,7 @@ plugin_init (GstPlugin * plugin)
 GST_PLUGIN_DEFINE (
     GST_VERSION_MAJOR,
     GST_VERSION_MINOR,
-    plugin,
+    ifdsrc,
     "IPTVPlayer ifdsrc",
     plugin_init,
     VERSION,
