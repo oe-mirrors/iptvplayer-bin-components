@@ -210,6 +210,8 @@ int main(int argc,char* argv[])
     gint bufferSize = -1;
     gint downloadTimeout = -1;
     gint isLive = -1;
+    gint dashMaxWidth = 0;
+    gint dashMaxHeight = 0;
 
     gboolean subtitlesEnabled = FALSE;
 
@@ -231,12 +233,12 @@ int main(int argc,char* argv[])
     int usedArgs = 2;
     if(usedArgs > argc)
     {
-    	printf("Usage: gstplayer filePath [-i audio-track index] [-l is-live (0|1)] [-t download-timeout (ms)] [-r ring-buffer-max-size (KB) ] [-s buffer-size (KB) ] [-d buffer-duration (seconds) ] [-p buffer-path] [-H http-header] [-v videosink] [-a audiosink] [-e]\n");
+    	printf("Usage: gstplayer filePath [-i audio-track index] [-l is-live (0|1)] [-t download-timeout (ms)] [-r ring-buffer-max-size (KB) ] [-s buffer-size (KB) ] [-d buffer-duration (seconds) ] [-p buffer-path] [-H http-header] [-v videosink] [-a audiosink] [-e] [-M max-video WxH (DASH)]\n");
         exit(1);
     }
     filename = g_strdup(argv[1]);
 
-    while ((c = getopt (argc-1, argv+1, "i:r:s:d:p:t:l:v:a:eH:")) != -1)
+    while ((c = getopt (argc-1, argv+1, "i:r:s:d:p:t:l:v:a:eH:M:")) != -1)
         switch (c)
         {
         case 'i':
@@ -272,9 +274,15 @@ int main(int argc,char* argv[])
         case 'H':
             pHeaderFields = AddHeader(pHeaderFields, optarg);
             break;
+        case 'M':
+            if (2 != sscanf(optarg, "%dx%d", &dashMaxWidth, &dashMaxHeight))
+            {
+                dashMaxWidth = dashMaxHeight = 0;
+            }
+            break;
         case '?':
         default:
-            printf("Usage: gstplayer filePath [-i audio-track index] [-l is-live (0|1)] [-t download-timeout (ms)] [-r ring-buffer-max-size (KB) ] [-s buffer-size (KB) ] [-d buffer-duration (seconds) ] [-p buffer-path] [-H http-header] [-v videosink] [-a audiosink] [-e]\n");
+            printf("Usage: gstplayer filePath [-i audio-track index] [-l is-live (0|1)] [-t download-timeout (ms)] [-r ring-buffer-max-size (KB) ] [-s buffer-size (KB) ] [-d buffer-duration (seconds) ] [-p buffer-path] [-H http-header] [-v videosink] [-a audiosink] [-e] [-M max-video WxH (DASH)]\n");
             exit(1);
         }
 
@@ -284,6 +292,7 @@ int main(int argc,char* argv[])
         backend_set_is_live(isLive);
     if (downloadTimeout != -1)
         backend_set_download_timeout(downloadTimeout);
+    backend_set_dash_max_video(dashMaxWidth, dashMaxHeight);
 
     commandRetVal = backend_play(filename, downloadBufferPath, ringBufferMaxSize, bufferDuration, bufferSize, pHeaderFields, videoSinkName, audioSinkName, subtitlesEnabled);
     {

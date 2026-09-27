@@ -67,6 +67,34 @@ static struct
     gint64 playbin_time;
 } g_eos_fix;
 
+/* DASH pipeline (createDashPlaybackPipeline): the demuxer's pads show up
+ * from its streaming thread, so everything below is guarded by g_dash_lock */
+static GMutex g_dash_lock;
+static struct
+{
+    GstElement *demux;
+    GstElement *vsink;
+    GstElement *asink;
+    const gchar *vsinkFactory;
+    const gchar *asinkFactory;
+    GPtrArray  *audioPads;      /* dashdemux audio_* pads in the order they appear */
+    gint        audioLinked;    /* index into audioPads of the played one, -1 none */
+    gboolean    videoLinked;
+    gchar      *videoEncoding;
+    gchar      *audioEncoding;
+    gint        videoWidth;
+    gint        videoHeight;
+    guint       videoFrameRate; /* fps * 1000 like the playbin tracks */
+    gint        maxWidth;       /* -M, 0 = no limit */
+    gint        maxHeight;
+} g_dash = { .audioLinked = -1 };
+
+/* tracks.h uses playbin properties; the DASH pipeline is a plain GstPipeline */
+static gboolean isPlaybin(void)
+{
+    return (g_gst_playbin && g_object_class_find_property(G_OBJECT_GET_CLASS(g_gst_playbin), "n-audio")) ? TRUE : FALSE;
+}
+
 /* Include common functions */
 #include "tracks.h"
 
@@ -656,36 +684,23 @@ const PlaybackInfo_t* backend_get_playback_info()
 
 static gboolean isDashUri(const gchar* uri)
 {
-    if (!uri) return FALSE;
-    gchar *lower = g_ascii_strdown(uri, -1);
-    gboolean is_dash = (strstr(lower, ".mpd") != NULL) ||
-                       (strstr(lower, "manifest.mpd") != NULL) ||
-                       (strstr(lower, "application/dash+xml") != NULL);
-    g_free(lower);
-    return is_dash;
-}
+    /* only the path counts: HLS/proxy URLs may carry ".mpd" in a parameter */
+    const gchar *end = NULL;
+    gchar *path = NULL;
+    gboolean is_dash = FALSE;
 
-static gchar* gstLaunchQuote(const gchar* value)
-{
-    GString *s = g_string_new("\"");
-    for (const gchar *p = value; *p; ++p) {
-        if (*p == '\\' || *p == '"') g_string_append_c(s, '\\');
-        g_string_append_c(s, *p);
-    }
-    g_string_append_c(s, '"');
-    return g_string_free(s, FALSE);
+    if (!uri) return FALSE;
+    end = strpbrk(uri, "?#");
+    path = g_ascii_strdown(uri, end ? (gssize)(end - uri) : -1);
+    /* the pipeline starts with souphttpsrc; local .mpd files go to playbin */
+    is_dash = (g_str_has_prefix(path, "http://") || g_str_has_prefix(path, "https://")) && g_str_has_suffix(path, ".mpd");
+    g_free(path);
+    return is_dash;
 }
 
 static void gstSetBoolIfAvailable(GstElement* element, const gchar* property, gboolean value)
 {
     if (!element || !property) return;
-    if (g_object_class_find_property(G_OBJECT_GET_CLASS(element), property))
-        g_object_set(G_OBJECT(element), property, value, NULL);
-}
-
-static void gstSetStringIfAvailable(GstElement* element, const gchar* property, const gchar* value)
-{
-    if (!element || !property || !value || !*value) return;
     if (g_object_class_find_property(G_OBJECT_GET_CLASS(element), property))
         g_object_set(G_OBJECT(element), property, value, NULL);
 }
@@ -699,53 +714,300 @@ static const gchar* pickFactory(const gchar *caller_choice, const gchar *aml_nam
     return dvb_name;
 }
 
-static GstElement* createDashPlaybackPipeline(const gchar* uri, const gchar *videosink, const gchar *audiosink)
+static void dashReset(void)
 {
-    const gchar *vsink_factory = pickFactory(videosink, "dreamvideosink", "dvbvideosink");
-    const gchar *asink_factory = pickFactory(audiosink, "dreamaudiosink", "dvbaudiosink");
-    gchar *quoted_uri = gstLaunchQuote(uri);
-    gchar *pipeline = g_strdup_printf(
-        "souphttpsrc name=dashsrc location=%s timeout=60 retries=20 "
-        "! dashdemux name=d connection-speed=4000 max-bitrate=3200000 "
-        "max-video-width=1280 max-video-height=720 max-video-framerate=50/1 "
-        "presentation-delay=6s "
-        "d.video_00 ! queue max-size-buffers=0 max-size-bytes=4194304 max-size-time=5000000000 "
-        "! qtdemux ! h264parse "
-        "! video/x-h264,stream-format=avc,alignment=au "
-        "! %s name=dashvideosink "
-        "d.audio_00 ! queue max-size-buffers=0 max-size-bytes=1048576 max-size-time=5000000000 "
-        "! qtdemux ! aacparse "
-        "! audio/mpeg,mpegversion=4,framed=true,stream-format=raw "
-        "! %s name=dashaudiosink",
-        quoted_uri, vsink_factory, asink_factory);
-    g_free(quoted_uri);
-
-    GError *err = NULL;
-    GstElement *element = gst_parse_launch(pipeline, &err);
-    g_free(pipeline);
-    if (!element) {
-        g_warning("[gstplayer2] DASH pipeline parse failed: %s", err ? err->message : "unknown");
-        if (err) g_error_free(err);
-        return NULL;
+    g_mutex_lock(&g_dash_lock);
+    if (g_dash.audioPads)
+    {
+        g_ptr_array_free(g_dash.audioPads, TRUE);
     }
-    if (err) {
-        g_warning("[gstplayer2] DASH pipeline parse warning: %s", err->message);
-        g_error_free(err);
+    g_free(g_dash.videoEncoding);
+    g_free(g_dash.audioEncoding);
+    g_dash.demux = NULL;
+    g_dash.vsink = NULL;
+    g_dash.asink = NULL;
+    g_dash.audioPads = NULL;
+    g_dash.audioLinked = -1;
+    g_dash.videoLinked = FALSE;
+    g_dash.videoEncoding = NULL;
+    g_dash.audioEncoding = NULL;
+    g_dash.videoWidth = 0;
+    g_dash.videoHeight = 0;
+    g_dash.videoFrameRate = 0;
+    g_mutex_unlock(&g_dash_lock);
+}
+
+/*
+ * parsebin exposed the elementary stream of a linked adaptation set: add the
+ * sink for it. Sinks exist only for streams the MPD really has, so a
+ * video-only or audio-only MPD prerolls, and any codec parsebin can parse
+ * reaches the sink (which reports a proper error if it cannot decode it).
+ */
+static void dashParsedPadAdded(GstElement *parsebin, GstPad *pad, gpointer data)
+{
+    gboolean isVideo = GPOINTER_TO_INT(data);
+    GstCaps *caps = gst_pad_get_current_caps(pad);
+    const GstStructure *s = NULL;
+    const gchar *media = NULL;
+    GstElement *sink = NULL;
+    GstElement *filter = NULL;
+    GstElement *first = NULL;
+    GstPad *sinkpad = NULL;
+    const gchar *factory = NULL;
+
+    if (!caps)
+    {
+        caps = gst_pad_query_caps(pad, NULL);
+    }
+    if (!caps || gst_caps_is_empty(caps))
+    {
+        if (caps) gst_caps_unref(caps);
+        return;
+    }
+    s = gst_caps_get_structure(caps, 0);
+    media = gst_structure_get_name(s);
+
+    g_mutex_lock(&g_dash_lock);
+    if (!g_str_has_prefix(media, isVideo ? "video/" : "audio/") || (isVideo ? g_dash.vsink : g_dash.asink))
+    {
+        /* not the stream this branch is for, or already linked */
+        g_mutex_unlock(&g_dash_lock);
+        gst_caps_unref(caps);
+        return;
+    }
+
+    factory = isVideo ? g_dash.vsinkFactory : g_dash.asinkFactory;
+    sink = gst_element_factory_make(factory, NULL);
+    if (!sink)
+    {
+        g_mutex_unlock(&g_dash_lock);
+        GST_ELEMENT_ERROR(parsebin, CORE, MISSING_PLUGIN, ("DASH: sink %s not available", factory), (NULL));
+        gst_caps_unref(caps);
+        return;
     }
     /* e2-sync/e2-async no-ops on dream*sinks (property missing). */
-    GstElement *vsink = gst_bin_get_by_name(GST_BIN(element), "dashvideosink");
-    if (vsink) {
-        gstSetBoolIfAvailable(vsink, "e2-sync",  FALSE);
-        gstSetBoolIfAvailable(vsink, "e2-async", FALSE);
-        gst_object_unref(vsink);
+    gstSetBoolIfAvailable(sink, "e2-sync",  FALSE);
+    gstSetBoolIfAvailable(sink, "e2-async", FALSE);
+
+    /* keep the stream formats the hardware sinks got before */
+    if (isVideo && !strcmp(media, "video/x-h264"))
+    {
+        GstCaps *fcaps = gst_caps_from_string("video/x-h264,stream-format=avc,alignment=au");
+        filter = gst_element_factory_make("capsfilter", NULL);
+        g_object_set(G_OBJECT(filter), "caps", fcaps, NULL);
+        gst_caps_unref(fcaps);
     }
-    GstElement *asink = gst_bin_get_by_name(GST_BIN(element), "dashaudiosink");
-    if (asink) {
-        gstSetBoolIfAvailable(asink, "e2-sync",  FALSE);
-        gstSetBoolIfAvailable(asink, "e2-async", FALSE);
-        gst_object_unref(asink);
+    else if (!isVideo && !strcmp(media, "audio/mpeg"))
+    {
+        gint mpegversion = 0;
+        if (gst_structure_get_int(s, "mpegversion", &mpegversion) && 4 == mpegversion)
+        {
+            GstCaps *fcaps = gst_caps_from_string("audio/mpeg,mpegversion=4,framed=true,stream-format=raw");
+            filter = gst_element_factory_make("capsfilter", NULL);
+            g_object_set(G_OBJECT(filter), "caps", fcaps, NULL);
+            gst_caps_unref(fcaps);
+        }
     }
-    return element;
+
+    if (isVideo)
+    {
+        gint num = 0;
+        gint denom = 0;
+        g_dash.vsink = sink;
+        g_free(g_dash.videoEncoding);
+        g_dash.videoEncoding = g_strdup(media);
+        gst_structure_get_int(s, "width", &g_dash.videoWidth);
+        gst_structure_get_int(s, "height", &g_dash.videoHeight);
+        if (gst_structure_get_fraction(s, "framerate", &num, &denom) && num > 0 && denom > 0)
+        {
+            g_dash.videoFrameRate = (guint)(num * 1000LL / denom);
+        }
+    }
+    else
+    {
+        g_dash.asink = sink;
+        g_free(g_dash.audioEncoding);
+        g_dash.audioEncoding = g_strdup(media);
+    }
+    g_mutex_unlock(&g_dash_lock);
+
+    gst_bin_add(GST_BIN(g_gst_playbin), sink);
+    first = sink;
+    if (filter)
+    {
+        gst_bin_add(GST_BIN(g_gst_playbin), filter);
+        if (!gst_element_link(filter, sink))
+        {
+            GST_ELEMENT_ERROR(parsebin, CORE, NEGOTIATION, ("DASH: %s cannot be linked to %s", media, factory), (NULL));
+        }
+        first = filter;
+    }
+    gst_element_sync_state_with_parent(sink);
+    if (filter)
+    {
+        gst_element_sync_state_with_parent(filter);
+    }
+
+    sinkpad = gst_element_get_static_pad(first, "sink");
+    if (GST_PAD_LINK_OK != gst_pad_link(pad, sinkpad))
+    {
+        GST_ELEMENT_ERROR(parsebin, CORE, NEGOTIATION, ("DASH: %s cannot be linked to %s", media, factory), (NULL));
+    }
+    gst_object_unref(sinkpad);
+    gst_caps_unref(caps);
+}
+
+/* queue ! parsebin behind one dashdemux pad */
+static void dashLinkBranch(GstPad *pad, gboolean isVideo)
+{
+    GstElement *queue = gst_element_factory_make("queue", NULL);
+    GstElement *parse = gst_element_factory_make("parsebin", NULL);
+    GstPad *sinkpad = NULL;
+
+    if (!queue || !parse)
+    {
+        if (queue) gst_object_unref(queue);
+        if (parse) gst_object_unref(parse);
+        GST_ELEMENT_ERROR(g_dash.demux, CORE, MISSING_PLUGIN, ("DASH: queue/parsebin not available"), (NULL));
+        return;
+    }
+    g_object_set(G_OBJECT(queue),
+                 "max-size-buffers", (guint)0,
+                 "max-size-bytes", (guint)(isVideo ? 4194304 : 1048576),
+                 "max-size-time", (guint64)(5 * GST_SECOND),
+                 NULL);
+    g_signal_connect(parse, "pad-added", G_CALLBACK(dashParsedPadAdded), GINT_TO_POINTER(isVideo));
+
+    gst_bin_add_many(GST_BIN(g_gst_playbin), queue, parse, NULL);
+    gst_element_link(queue, parse);
+    gst_element_sync_state_with_parent(parse);
+    gst_element_sync_state_with_parent(queue);
+
+    sinkpad = gst_element_get_static_pad(queue, "sink");
+    if (GST_PAD_LINK_OK != gst_pad_link(pad, sinkpad))
+    {
+        GST_ELEMENT_ERROR(g_dash.demux, CORE, NEGOTIATION, ("DASH: cannot link %s", GST_PAD_NAME(pad)), (NULL));
+    }
+    gst_object_unref(sinkpad);
+}
+
+/* remember the language of an audio adaptation set: later tag events on
+ * a played pad replace the one that carried it */
+static GstPadProbeReturn dashTagProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data)
+{
+    GstEvent *event = GST_PAD_PROBE_INFO_EVENT(info);
+    if (event && GST_EVENT_TAG == GST_EVENT_TYPE(event) && !g_object_get_data(G_OBJECT(pad), "e2i-lang"))
+    {
+        GstTagList *tags = NULL;
+        gchar *lang = NULL;
+        gst_event_parse_tag(event, &tags);
+        if (tags && gst_tag_list_get_string(tags, GST_TAG_LANGUAGE_CODE, &lang))
+        {
+            g_object_set_data_full(G_OBJECT(pad), "e2i-lang", lang, g_free);
+        }
+    }
+    return GST_PAD_PROBE_OK;
+}
+
+/*
+ * dashdemux exposes one pad per adaptation set (video_NN, audio_NN,
+ * subtitle_NN). The first video set and one audio set (-i, default the
+ * first) get played; the others stay unlinked, so the demuxer stops
+ * downloading them.
+ */
+static void dashDemuxPadAdded(GstElement *demux, GstPad *pad, gpointer data)
+{
+    const gchar *name = GST_PAD_NAME(pad);
+    gboolean linkVideo = FALSE;
+    gboolean linkAudio = FALSE;
+
+    g_mutex_lock(&g_dash_lock);
+    if (g_str_has_prefix(name, "video") && !g_dash.videoLinked)
+    {
+        g_dash.videoLinked = TRUE;
+        linkVideo = TRUE;
+    }
+    else if (g_str_has_prefix(name, "audio") && g_dash.audioPads)
+    {
+        gint idx = (gint)g_dash.audioPads->len;
+        gint wanted = g_audio_idx >= 0 ? g_audio_idx : 0;
+        g_ptr_array_add(g_dash.audioPads, gst_object_ref(pad));
+        gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, dashTagProbe, NULL, NULL);
+        if (g_dash.audioLinked < 0 && idx == wanted)
+        {
+            g_dash.audioLinked = idx;
+            linkAudio = TRUE;
+        }
+    }
+    g_mutex_unlock(&g_dash_lock);
+
+    if (linkVideo || linkAudio)
+    {
+        dashLinkBranch(pad, linkVideo);
+    }
+}
+
+static void dashDemuxNoMorePads(GstElement *demux, gpointer data)
+{
+    GstPad *pad = NULL;
+
+    /* the requested audio index does not exist: play the first one */
+    g_mutex_lock(&g_dash_lock);
+    if (g_dash.audioLinked < 0 && g_dash.audioPads && g_dash.audioPads->len > 0)
+    {
+        g_dash.audioLinked = 0;
+        pad = GST_PAD(gst_object_ref(g_ptr_array_index(g_dash.audioPads, 0)));
+    }
+    g_mutex_unlock(&g_dash_lock);
+
+    if (pad)
+    {
+        dashLinkBranch(pad, FALSE);
+        gst_object_unref(pad);
+    }
+}
+
+static GstElement* createDashPlaybackPipeline(const gchar* uri, const gchar *videosink, const gchar *audiosink)
+{
+    GstElement *pipeline = gst_pipeline_new("dash-player");
+    GstElement *src = gst_element_factory_make("souphttpsrc", "dashsrc");
+    GstElement *demux = gst_element_factory_make("dashdemux", "d");
+
+    if (!pipeline || !src || !demux)
+    {
+        g_warning("[gstplayer2] DASH pipeline: souphttpsrc or dashdemux missing");
+        if (pipeline) gst_object_unref(pipeline);
+        if (src) gst_object_unref(src);
+        if (demux) gst_object_unref(demux);
+        return NULL;
+    }
+
+    dashReset();
+    g_mutex_lock(&g_dash_lock);
+    g_dash.demux = demux;
+    g_dash.audioPads = g_ptr_array_new_with_free_func(gst_object_unref);
+    g_dash.vsinkFactory = pickFactory(videosink, "dreamvideosink", "dvbvideosink");
+    g_dash.asinkFactory = pickFactory(audiosink, "dreamaudiosink", "dvbaudiosink");
+    g_mutex_unlock(&g_dash_lock);
+
+    g_object_set(G_OBJECT(src), "location", uri, "timeout", (guint)60, "retries", (gint)20, NULL);
+    g_object_set(G_OBJECT(demux), "presentation-delay", "6s", NULL);
+    if (g_dash.maxWidth > 0 && g_dash.maxHeight > 0)
+    {
+        g_object_set(G_OBJECT(demux), "max-video-width", (guint)g_dash.maxWidth, "max-video-height", (guint)g_dash.maxHeight, NULL);
+    }
+
+    gst_bin_add_many(GST_BIN(pipeline), src, demux, NULL);
+    if (!gst_element_link(src, demux))
+    {
+        g_warning("[gstplayer2] DASH pipeline: cannot link souphttpsrc to dashdemux");
+        gst_object_unref(pipeline);
+        dashReset();
+        return NULL;
+    }
+    g_signal_connect(demux, "pad-added", G_CALLBACK(dashDemuxPadAdded), NULL);
+    g_signal_connect(demux, "no-more-pads", G_CALLBACK(dashDemuxNoMorePads), NULL);
+    return pipeline;
 }
 
 void backend_init(int *argc, char **argv[], const int sfd)
@@ -979,6 +1241,7 @@ int backend_stop()
         close(g_fileFd);
         g_fileFd = -1;
     }
+    dashReset();
 
     memset(&g_playback_info, 0, sizeof(g_playback_info));
     InfoStructChanged();
@@ -1207,6 +1470,13 @@ int backend_set_download_timeout(const uint64_t mseconds)
     {
         g_object_set(G_OBJECT(g_gstIFDSrc), "timeout", g_iptv_download_timeout, NULL);
     }
+    return 0;
+}
+
+int backend_set_dash_max_video(const int width, const int height)
+{
+    g_dash.maxWidth = width > 0 ? width : 0;
+    g_dash.maxHeight = height > 0 ? height : 0;
     return 0;
 }
 

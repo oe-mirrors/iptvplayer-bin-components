@@ -129,6 +129,8 @@ def common_checks(tag, run, expect_eos=True):
     check('%s: no invalid JSON lines' % tag, not run.bad_json, repr(run.bad_json[:3]))
     check('%s: version 10022' % tag, [e.get('version') for e in run.events('GSTPLAYER_EXTENDED')] == [10022],
           repr(run.events('GSTPLAYER_EXTENDED')))
+    glib = [l for l in run.lines if 'CRITICAL' in l or 'GLib-GObject-WARNING' in l]
+    check('%s: no GLib CRITICAL lines' % tag, not glib, repr(glib[:2]))
     play = run.events('PLAYBACK_PLAY')
     check('%s: PLAYBACK_PLAY sts 0' % tag, bool(play) and play[0].get('sts') == 0, repr(play))
     if expect_eos:
@@ -234,6 +236,66 @@ def test_http(tmp, base, name, path, prefix, segment_ext):
         header_checks(name, requests, lambda p: p.startswith('/' + prefix) and p.endswith(segment_ext), 'segments')
 
 
+def segments(requests, prefix):
+    """representation ids of the media segments fetched below prefix"""
+    ids = set()
+    for path, _ in requests:
+        name = path.rsplit('/', 1)[-1]
+        if path.startswith('/' + prefix) and name.startswith('chunk-'):
+            ids.add(name.split('-')[1])
+    return ids
+
+
+def test_dash_variants(tmp, base):
+    for name in ('vonly', 'aonly', 'hevc', 'eac3'):
+        print('DASH %s' % name)
+        run = Run(['%s/dash-%s/manifest.mpd' % (base, name)] + SINKS, timeout=60)
+        common_checks('dash-' + name, run)
+        lengths = [e.get('length', 0) for e in run.events('PLAYBACK_LENGTH')]
+        check('dash-%s: prerolled (length reported)' % name, any(l > 10 for l in lengths), repr(lengths) + '\n' + run.dump())
+
+
+def test_dash_multi(tmp, base):
+    url = '%s/dash-multi/manifest.mpd' % base
+
+    print('DASH 720p + 1080p, 2 audio languages (default)')
+    with REQUESTS_LOCK:
+        del REQUESTS[:]
+    run = Run([url] + SINKS, timeout=60, commands=[(3, 'al')])
+    common_checks('dash-multi', run)
+    with REQUESTS_LOCK:
+        segs = segments(REQUESTS, 'dash-multi/')
+    check('dash-multi: 1080p representation used', '1' in segs, repr(sorted(segs)))
+    check('dash-multi: first audio language played, second not downloaded', '2' in segs and '3' not in segs, repr(sorted(segs)))
+    lists = run.events('a_l')
+    names = [t.get('n') for t in lists[-1]] if lists else []
+    check('dash-multi: audio track list has both languages', names == ['deu', 'eng'], repr(lists))
+
+    print('DASH -M 1280x720')
+    with REQUESTS_LOCK:
+        del REQUESTS[:]
+    run = Run([url, '-M', '1280x720'] + SINKS, timeout=60)
+    common_checks('dash-multi-M', run)
+    with REQUESTS_LOCK:
+        segs = segments(REQUESTS, 'dash-multi/')
+    check('dash-multi-M: only the 720p representation', '0' in segs and '1' not in segs, repr(sorted(segs)))
+
+    print('DASH -i 1 (second audio language)')
+    with REQUESTS_LOCK:
+        del REQUESTS[:]
+    run = Run([url, '-i', '1'] + SINKS, timeout=60)
+    common_checks('dash-multi-i1', run)
+    with REQUESTS_LOCK:
+        segs = segments(REQUESTS, 'dash-multi/')
+    check('dash-multi-i1: second language played', '3' in segs and '2' not in segs, repr(sorted(segs)))
+
+
+def test_mpd_in_query(tmp, base):
+    print('HLS URL with ".mpd" in the query (must not use the DASH pipeline)')
+    run = Run(['%s/hls/index.m3u8?src=file.mpd' % base] + SINKS, timeout=60)
+    common_checks('hls-mpd-query', run)
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix='gst2ci-')
     server, base = start_server()
@@ -245,6 +307,9 @@ def main():
     test_http(tmp, base, 'progressive', 'a.mp4', '', None)
     test_http(tmp, base, 'hls', 'hls/index.m3u8', 'hls/', '.ts')
     test_http(tmp, base, 'dash', 'dash/manifest.mpd', 'dash/', '.m4s')
+    test_dash_variants(tmp, base)
+    test_dash_multi(tmp, base)
+    test_mpd_in_query(tmp, base)
     server.shutdown()
     print('\n%d failed check(s)' % len(FAILED))
     for name in FAILED:
