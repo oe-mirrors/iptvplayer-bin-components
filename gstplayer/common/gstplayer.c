@@ -124,7 +124,7 @@ static StrPair_t **AddHeader(StrPair_t **vector, const char *headerString)
 
         /* key */
         size = ptr - headerString;
-        headerField->pKey = calloc(size, sizeof(char));
+        headerField->pKey = calloc(size+1, sizeof(char));
         strncpy(headerField->pKey, headerString, size);
 
         /* val */
@@ -221,7 +221,7 @@ int main(int argc,char* argv[])
 #if GST_VERSION_MAJOR < 1
     int ver = 20;
 #else
-    int ver = 10021;
+    int ver = 10022;
 #endif
     fprintf(stderr, "{\"GSTPLAYER_EXTENDED\":{\"version\":%d,\"gst_ver_major\":%d}}\n", ver, GST_VERSION_MAJOR);
 
@@ -286,7 +286,11 @@ int main(int argc,char* argv[])
         backend_set_download_timeout(downloadTimeout);
 
     commandRetVal = backend_play(filename, downloadBufferPath, ringBufferMaxSize, bufferDuration, bufferSize, pHeaderFields, videoSinkName, audioSinkName, subtitlesEnabled);
-    fprintf(stderr, "{\"PLAYBACK_PLAY\":{\"file\":\"%s\", \"sts\":%d}}\n", argv[1], commandRetVal);
+    {
+        gchar *escapedFile = json_escape(argv[1]);
+        fprintf(stderr, "{\"PLAYBACK_PLAY\":{\"file\":\"%s\", \"sts\":%d}}\n", escapedFile, commandRetVal);
+        g_free(escapedFile);
+    }
 
     if(0 == commandRetVal)
     {
@@ -429,9 +433,9 @@ int main(int argc,char* argv[])
                         {
                             seconds = ergSec; //seek;
                         }
+                        commandRetVal = backend_seek_absolute(seconds); //backend_seek(seconds);
+                        fprintf(stderr, "{\"PLAYBACK_SEEK\":{\"sec\":%lf, \"sts\":%d}}\n", seconds, commandRetVal);
                     }
-                    commandRetVal = backend_seek_absolute(seconds); //backend_seek(seconds);
-                    fprintf(stderr, "{\"PLAYBACK_SEEK\":{\"sec\":%lf, \"sts\":%d}}\n", seconds, commandRetVal);
                 }
                 break;
             }

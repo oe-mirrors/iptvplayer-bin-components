@@ -70,56 +70,46 @@ static struct
 /* Include common functions */
 #include "tracks.h"
 
-/* return timestamp in miliseconds */
+/* return monotonic timestamp in miliseconds (the wall clock jumps when the
+ * box syncs its time, which made the EOS fix stop playback) */
 static gint64 getTimestamp()
 {
-#if 1
-    struct timeval  tv;
-    gettimeofday(&tv, NULL);
-    return (tv.tv_sec) * 1000 + (tv.tv_usec) / 1000;
-#else
-    struct timespec tsnow;
-    if(0 == clock_gettime(CLOCK_MONOTONIC, &tsnow))
-    {
-        return (gint64)tsnow.tv_sec * 1000 + tsnow.tv_nsec / 1000000L;
-    }
-    return 0;
-#endif
+    return g_get_monotonic_time() / 1000;
 }
 
-static void escape_newline(const char *src, char **dest)
+gchar *json_escape(const gchar *str)
 {
-    int tocopy = 0;
-    int newline = 0;
-    const char *ppos_src = src;
-    char *ppos_src_newline = 0;
-    char *ppos_dest = 0;
+    const guchar *p = NULL;
+    GString *out = NULL;
 
-    while ((ppos_src_newline = strchr(ppos_src, '\n')) != NULL)
+    if (NULL == str)
     {
-        ppos_src = ppos_src_newline;
-        ppos_src++;
-        newline++;
+        return g_strdup("");
     }
-    int origlen = strlen(src);
-    int newlen = origlen + newline + 1;
 
-    *dest = (char *) malloc(sizeof(char) * newlen);
-    ppos_dest = *dest;
-
-    ppos_src = src;
-    ppos_src_newline = 0;
-
-    while ((ppos_src_newline = strchr(ppos_src, '\n')) != NULL)
+    out = g_string_sized_new(strlen(str) + 8);
+    for (p = (const guchar *) str; *p; ++p)
     {
-        tocopy = ppos_src_newline - ppos_src;
-        strncpy(ppos_dest, ppos_src, tocopy);
-        ppos_src = ppos_src_newline + 1;
-        ppos_dest += tocopy;
-        *(ppos_dest++) = '\\';
-        *(ppos_dest++) = 'n';
+        switch (*p)
+        {
+            case '"':  g_string_append(out, "\\\""); break;
+            case '\\': g_string_append(out, "\\\\"); break;
+            case '\n': g_string_append(out, "\\n"); break;
+            case '\r': g_string_append(out, "\\r"); break;
+            case '\t': g_string_append(out, "\\t"); break;
+            default:
+                if (*p < 0x20)
+                {
+                    g_string_append_printf(out, "\\u%04x", *p);
+                }
+                else
+                {
+                    g_string_append_c(out, *p);
+                }
+                break;
+        }
     }
-    strcpy(ppos_dest, ppos_src);
+    return g_string_free(out, FALSE);
 }
 
 static gint match_sinktype(const GValue *velement, const gchar *type)
@@ -195,17 +185,14 @@ static void gstCBsubtitleAvail(GstElement *subsink, GstBuffer *buffer, gpointer 
 
     if (GST_BUFFER_PTS_IS_VALID(buffer) && GST_BUFFER_DURATION_IS_VALID(buffer))
     {
-        gchar *text = NULL;
         gchar *data = g_strndup((const gchar *) map.data, map.size);
-        escape_newline(data, &text);
         GstMessage *message = gst_message_new_application(GST_OBJECT(g_gst_playbin),
             gst_structure_new ("subtitle",
                 "start", GST_TYPE_CLOCK_TIME, GST_BUFFER_PTS(buffer),
                 "duration", GST_TYPE_CLOCK_TIME, GST_BUFFER_DURATION(buffer),
-                "text", G_TYPE_STRING, text, NULL)
+                "text", G_TYPE_STRING, data, NULL)
             );
         g_free(data);
-        g_free(text);
         gst_element_post_message(g_gst_playbin, message);
     }
     gst_buffer_unmap(buffer, &map);
@@ -251,72 +238,121 @@ static void gsElementAddedCallback(GstBin *bin, GstElement *element, gpointer da
     g_free(elementname);
 }
 
+static gboolean isConfigurableHttpSrc(GstElement *element)
+{
+    /* souphttpsrc: the only source with a cookies property of the format we expect */
+    GParamSpec* pspec = g_object_class_find_property(G_OBJECT_GET_CLASS(element), "cookies");
+    return (pspec && G_TYPE_STRV == pspec->value_type) ? TRUE : FALSE;
+}
+
+/*
+ * Apply the -H fields to an http source. Used for playbin's source, the
+ * DASH pipeline's source and every http source adaptive demuxers
+ * (hlsdemux, dashdemux) create for playlists, fragments and keys.
+ */
+static void gstApplyHttpHeaders(GstElement *element)
+{
+    GstStructure *extraHeaders = NULL;
+    StrPair_t **headerField = NULL;
+
+    if (!g_ptr_http_header_fields || !element || !isConfigurableHttpSrc(element))
+    {
+        return;
+    }
+
+    if (g_object_class_find_property(G_OBJECT_GET_CLASS(element), "ssl-strict") != 0)
+    {
+        g_object_set(G_OBJECT(element), "ssl-strict", FALSE, NULL);
+    }
+
+    /* keep what the owner already set (adaptive demuxers add Referer and
+     * Cache-Control to fragment sources) and add all our headers to it;
+     * setting one structure per header kept only the last one */
+    if (g_object_class_find_property(G_OBJECT_GET_CLASS(element), "extra-headers") != 0)
+    {
+        g_object_get(element, "extra-headers", &extraHeaders, NULL);
+    }
+    if (!extraHeaders)
+    {
+        extraHeaders = gst_structure_new_empty("extra-headers");
+    }
+
+    for (headerField = g_ptr_http_header_fields; *headerField; ++headerField)
+    {
+        const gchar *key = (*headerField)->pKey;
+        const gchar *val = (*headerField)->pVal;
+
+        if (!strcmp(key, "proxy-id"))
+        {
+            g_object_set(element, "proxy-id", val, NULL);
+        }
+        else if (!strcmp(key, "proxy-pw"))
+        {
+            g_object_set(element, "proxy-pw", val, NULL);
+        }
+        else if (!strcmp(key, "proxy"))
+        {
+            g_object_set(element, "proxy", val, NULL);
+        }
+        else if (!g_ascii_strcasecmp(key, "User-Agent"))
+        {
+            g_object_set(element, "user-agent", val, NULL);
+        }
+        else if (!g_ascii_strcasecmp(key, "Cookie"))
+        {
+            /* one entry: souphttpsrc sends each entry as its own Cookie
+             * value, so "a=1; b=2" must not be split (and never at ',') */
+            gchar *cookies[] = { (gchar *) val, NULL };
+            g_object_set(element, "cookies", cookies, NULL);
+        }
+        else
+        {
+            gst_structure_set(extraHeaders, key, G_TYPE_STRING, val, NULL);
+        }
+    }
+
+    if (gst_structure_n_fields(extraHeaders) > 0)
+    {
+        g_object_set(element, "extra-headers", extraHeaders, NULL);
+    }
+    gst_structure_free(extraHeaders);
+}
+
 static void gstSourceChangedCallback(GObject *object, GParamSpec *pspec, gpointer data)
 {
+    GstElement* element = NULL;
+
     if(!g_ptr_http_header_fields)
     {
         return;
     }
 
-    GstElement* element = NULL;
     g_object_get(g_gst_playbin, "source", &element, NULL);
     if (element)
     {
-        // First check if the source element has a cookies property
-        // of the format we expect
-        GParamSpec* pspec = g_object_class_find_property(G_OBJECT_GET_CLASS(element), "cookies");
-        if (!pspec || G_TYPE_STRV != pspec->value_type)
-        {
-            gst_object_unref(element);
-            return;
-        }
-
-        if (g_object_class_find_property(G_OBJECT_GET_CLASS(element), "ssl-strict") != 0)
-        {
-            g_object_set(G_OBJECT(element), "ssl-strict", FALSE, NULL);
-        }
-
-        StrPair_t **headerField = g_ptr_http_header_fields;
-        while(*headerField)
-        {
-            /*
-            printf("headerField[%p]\n", (*headerField));
-            printf("headerField->pKey [%s]\n", (*headerField)->pKey);
-            printf("headerField->pVal [%s]\n", (*headerField)->pVal);
-            */
-            if(!strncmp((*headerField)->pKey, "proxy-id", 8))
-            {
-                g_object_set(element, "proxy-id", (*headerField)->pVal, NULL);
-            }
-            else if(!strncmp((*headerField)->pKey, "proxy-pw", 8))
-            {
-                g_object_set(element, "proxy-pw", (*headerField)->pVal, NULL);
-            }
-            else if(!strncmp((*headerField)->pKey, "proxy", 5))
-            {
-                g_object_set(element, "proxy", (*headerField)->pVal, NULL);
-            }
-            else if(!strncmp((*headerField)->pKey, "User-Agent", 10))
-            {
-                g_object_set(element, "user-agent", (*headerField)->pVal, NULL);
-            }
-            else if(!strncmp((*headerField)->pKey, "Cookie", 10))
-            {
-                gchar **cookies = g_strsplit((*headerField)->pVal, ",", -1);
-                g_object_set (element, "cookies", cookies, NULL);
-                g_strfreev (cookies);
-            }
-            else
-            {
-                GstStructure *extraHeaders = gst_structure_new("extra-headers", (*headerField)->pKey, G_TYPE_STRING, (*headerField)->pVal, NULL);
-                g_object_set(element, "extra-headers", extraHeaders, NULL);
-                gst_structure_free(extraHeaders);
-            }
-            ++headerField;
-        }
+        gstApplyHttpHeaders(element);
+        gst_object_unref(element);
     }
+}
 
-    gst_object_unref(element);
+static void gstSetupIFDSrc(GstElement *element)
+{
+    if (NULL != g_gstIFDSrc || strcmp(g_type_name(G_OBJECT_TYPE(element)), "GstIFDSrc"))
+    {
+        return;
+    }
+    g_gstIFDSrc = GST_ELEMENT_CAST(gst_object_ref(element));
+    g_object_set(G_OBJECT(g_gstIFDSrc), "timeout", g_iptv_download_timeout, NULL);
+    g_object_set(G_OBJECT(g_gstIFDSrc), "is_live", g_is_live, NULL);
+}
+
+static void gstDeepElementAddedCallback(GstBin *bin, GstBin *subBin, GstElement *element, gpointer data)
+{
+    gstApplyHttpHeaders(element);
+    if (g_iptv_download_timeout > 0)
+    {
+        gstSetupIFDSrc(element);
+    }
 }
 
 static GstBusSyncReply gstBusSyncHandler(GstBus *bus, GstMessage *message, gpointer user_data)
@@ -378,7 +414,7 @@ static gboolean gstBusCall(GstBus *bus, GstMessage *msg)
                 {
                     case GST_STATE_CHANGE_NULL_TO_READY:
                     {
-                        if (g_iptv_download_timeout > 0)
+                        if (g_iptv_download_timeout > 0 && NULL == g_gstIFDSrc)
                         {
                             GValue result = { 0, };
                             GstIterator *children = gst_bin_iterate_recurse(GST_BIN(g_gst_playbin));
@@ -474,7 +510,9 @@ static gboolean gstBusCall(GstBus *bus, GstMessage *msg)
             //fprintf(stderr, "Debug: %s\n", debug);
             g_free(debug);
 
-            fprintf(stderr, "{\"GST_ERROR\":{\"msg\":\"%s\",\"code\":%i}}\n", err->message, err->code);
+            gchar *escapedMsg = json_escape(err->message);
+            fprintf(stderr, "{\"GST_ERROR\":{\"msg\":\"%s\",\"code\":%i}}\n", escapedMsg, err->code);
+            g_free(escapedMsg);
             g_error_free(err);
 
             g_playback_info.isPlaying = 0;
@@ -512,7 +550,9 @@ static gboolean gstBusCall(GstBus *bus, GstMessage *msg)
             if( description )
             {
                 g_debug("GStreamer plugin [%s] not available!\n", description);
-                fprintf(stderr, "{\"GST_MISSING_PLUGIN\":{\"msg\":\"%s\"}}\n", description);
+                gchar *escapedDesc = json_escape(description);
+                fprintf(stderr, "{\"GST_MISSING_PLUGIN\":{\"msg\":\"%s\"}}\n", escapedDesc);
+                g_free(escapedDesc);
                 g_free(description);
             }
         }
@@ -583,9 +623,12 @@ static gboolean gstBusCall(GstBus *bus, GstMessage *msg)
                 gst_structure_get_clock_time(msgstruct, "start", &start);
                 gst_structure_get_clock_time(msgstruct, "duration", &duration);
                 text = gst_structure_get_string(msgstruct, "text");
-                fprintf(stderr, "{\"PLAYBACK_SUBTITLE\":{\"start\":%lld, \"duration\":%lld, \"text\":\"%s\"}}\n", GST_TIME_AS_MSECONDS(start), GST_TIME_AS_MSECONDS(duration), text);
+                gchar *escapedText = json_escape(text);
+                fprintf(stderr, "{\"PLAYBACK_SUBTITLE\":{\"start\":%lld, \"duration\":%lld, \"text\":\"%s\"}}\n", GST_TIME_AS_MSECONDS(start), GST_TIME_AS_MSECONDS(duration), escapedText);
+                g_free(escapedText);
             }
         }
+        break;
     }
     default:
         break;
@@ -729,6 +772,16 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
     {
         g_gst_playbin = createDashPlaybackPipeline(filename, videosink, audiosink);
         if (!g_gst_playbin) return -1;
+        if (g_ptr_http_header_fields)
+        {
+            GstElement *dashsrc = gst_bin_get_by_name(GST_BIN(g_gst_playbin), "dashsrc");
+            if (dashsrc)
+            {
+                gstApplyHttpHeaders(dashsrc);
+                gst_object_unref(dashsrc);
+            }
+            g_signal_connect(g_gst_playbin, "deep-element-added", G_CALLBACK(gstDeepElementAddedCallback), NULL);
+        }
         GstBus *bus = gst_pipeline_get_bus(GST_PIPELINE(g_gst_playbin));
         gst_bus_set_sync_handler(bus, gstBusSyncHandler, NULL, NULL);
         gst_object_unref(bus);
@@ -751,6 +804,7 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
             if(g_ptr_http_header_fields)
             {
                 g_signal_connect(g_gst_playbin, "notify::source", G_CALLBACK(gstSourceChangedCallback), NULL);
+                g_signal_connect(g_gst_playbin, "deep-element-added", G_CALLBACK(gstDeepElementAddedCallback), NULL);
             }
 
 
@@ -783,7 +837,7 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
         }
         else
         {
-            g_object_set(g_gst_playbin, "buffer-size", (guint64)(0), NULL);
+            g_object_set(g_gst_playbin, "buffer-size", (gint)0, NULL);
             g_is_local_file = TRUE;
         }
 
@@ -817,8 +871,11 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
             if(g_iptv_download_timeout > 0)
             {
                 g_fileFd = open(filename, O_RDONLY);
-
+            }
+            if(g_iptv_download_timeout > 0 && g_fileFd >= 0)
+            {
                 gchar *fduri = g_strdup_printf ("ifd://%d", g_fileFd);
+                g_signal_connect(g_gst_playbin, "deep-element-added", G_CALLBACK(gstDeepElementAddedCallback), NULL);
                 g_object_set(G_OBJECT (g_gst_playbin), "uri", fduri, NULL);
                 g_free(fduri);
             }
@@ -834,7 +891,9 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
                 {
                     flags |= GST_PLAY_FLAG_TEXT;
                     g_signal_connect (g_subsink, "new-buffer", G_CALLBACK (gstCBsubtitleAvail), NULL);
-                    g_object_set (G_OBJECT (g_subsink), "caps", gst_caps_from_string("text/plain; text/x-plain; text/x-raw; text/x-pango-markup"), NULL);
+                    GstCaps *subcaps = gst_caps_from_string("text/plain; text/x-plain; text/x-raw; text/x-pango-markup");
+                    g_object_set (G_OBJECT (g_subsink), "caps", subcaps, NULL);
+                    gst_caps_unref(subcaps);
                     g_object_set (G_OBJECT (g_gst_playbin), "text-sink", g_subsink, NULL);
                     g_object_set (G_OBJECT (g_gst_playbin), "current-text", -1, NULL);
                 }

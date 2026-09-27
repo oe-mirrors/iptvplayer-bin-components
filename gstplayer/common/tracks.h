@@ -247,11 +247,16 @@ static void FillAudioTracks()
         GstTagList *tags = NULL;
         GstPad* pad = 0;
         g_signal_emit_by_name (g_gst_playbin, "get-audio-pad", i, &pad);
+        if (!pad)
+        {
+            continue;
+        }
 #if GST_VERSION_MAJOR < 1
         GstCaps* caps = gst_pad_get_negotiated_caps(pad);
 #else
         GstCaps* caps = gst_pad_get_current_caps(pad);
 #endif
+        gst_object_unref(pad);
         if (!caps)
         {
             continue;
@@ -384,7 +389,12 @@ static void FillSubtitlesTracks()
         GstTagList *tags = NULL;
         GstPad* pad = 0;
         g_signal_emit_by_name (g_gst_playbin, "get-text-pad", i, &pad);
+        if (!pad)
+        {
+            continue;
+        }
         GstCaps* caps = gst_pad_get_current_caps(pad);
+        gst_object_unref(pad);
         if (!caps)
         {
             continue;
@@ -493,7 +503,11 @@ TrackDescription_t* backend_get_tracks_list(const char type, int *num)
             {
                 fprintf(stderr, ", ");
             }
-            fprintf(stderr, "{\"id\":%d,\"e\":\"%s\",\"n\":\"%s\"}", pTracks[i].Id , pTracks[i].Encoding, pTracks[i].Name);
+            gchar *e = json_escape(pTracks[i].Encoding);
+            gchar *n = json_escape(pTracks[i].Name);
+            fprintf(stderr, "{\"id\":%d,\"e\":\"%s\",\"n\":\"%s\"}", pTracks[i].Id , e, n);
+            g_free(e);
+            g_free(n);
         }
         fprintf(stderr, "]}\n");
     }
@@ -527,18 +541,36 @@ TrackDescription_t* backend_get_current_track(const char type)
         num     = g_video_num;
     }
 
-    if (idx >= 0 && idx < num && NULL != pTracks)
+    if (idx >= 0 && NULL != pTracks)
     {
-        track = &pTracks[idx];
+        /* the lists skip streams without caps, so the playbin index is not
+         * always the position in the list */
+        int i;
+        for (i = 0; i < num; ++i)
+        {
+            if (pTracks[i].Id == idx)
+            {
+                track = &pTracks[i];
+                break;
+            }
+        }
+    }
+
+    if (NULL != track)
+    {
+        gchar *e = json_escape(track->Encoding);
+        gchar *n = json_escape(track->Name);
         if ('a' == type || 's' == type)
         {
-            fprintf(stderr, "{\"%c_%c\":{\"id\":%d,\"e\":\"%s\",\"n\":\"%s\"}}\n", type, 'c', track->Id , track->Encoding, track->Name);
+            fprintf(stderr, "{\"%c_%c\":{\"id\":%d,\"e\":\"%s\",\"n\":\"%s\"}}\n", type, 'c', track->Id , e, n);
         }
         else // video
         {
             // information about only current video track will be stored
-            fprintf(stderr, "{\"%c_%c\":{\"id\":%d,\"e\":\"%s\",\"n\":\"%s\",\"w\":%d,\"h\":%d,\"f\":%u,\"p\":%d}}\n", type, 'c', track->Id , track->Encoding, track->Name, track->width, track->height, track->frame_rate, track->progressive);
+            fprintf(stderr, "{\"%c_%c\":{\"id\":%d,\"e\":\"%s\",\"n\":\"%s\",\"w\":%d,\"h\":%d,\"f\":%u,\"p\":%d}}\n", type, 'c', track->Id , e, n, track->width, track->height, track->frame_rate, track->progressive);
         }
+        g_free(e);
+        g_free(n);
     }
     return track;
 }
