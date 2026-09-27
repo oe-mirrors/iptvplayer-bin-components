@@ -1,0 +1,86 @@
+name: build + test gstplayer2 / gst-ifdsrc
+
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  gstplayer2:
+    strategy:
+      fail-fast: false
+      matrix:
+        # x86_64 and aarch64; the boxes are ARM, the feed cross-compiles
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install build-essential autoconf automake libtool pkg-config \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-tools \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+            gstreamer1.0-libav ffmpeg binutils
+          gst-inspect-1.0 --version
+
+      # same compiler call as meta-oe/recipes-multimedia/gstplayer2/gstplayer2_0.2.bb,
+      # plus warnings; errors on the classes that break on other ABIs
+      - name: build gstplayer2 (recipe command)
+        working-directory: gstplayer/gst-1.0
+        run: |
+          gcc -Wall -Werror=implicit-function-declaration -Werror=return-type -Werror=int-conversion \
+            -Werror=incompatible-pointer-types \
+            *.c ../common/*.c -I../common/ \
+            $(pkg-config --cflags --libs gstreamer-1.0 gstreamer-pbutils-1.0) -o gstplayer2
+          ./gstplayer2 2>&1 | head -3 || true
+
+      - name: build gstplayer2 with ASan/UBSan
+        working-directory: gstplayer/gst-1.0
+        run: |
+          gcc -g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined \
+            *.c ../common/*.c -I../common/ \
+            $(pkg-config --cflags --libs gstreamer-1.0 gstreamer-pbutils-1.0) -o gstplayer2-asan
+
+      - name: build gst-ifdsrc (autotools, like the gst-ifdsrc recipe)
+        working-directory: gst-ifdsrc/gst-ifdsrc
+        run: |
+          autoreconf --force --install
+          ./configure
+          make -j2
+
+      - name: gst-ifdsrc loads and provides ifd://
+        run: |
+          set -x
+          so=gst-ifdsrc/gst-ifdsrc/src/.libs/libgstifdsrc.so
+          nm -D --defined-only "$so" | grep gst_plugin_
+          nm -D --defined-only "$so" | grep -q gst_plugin_ifdsrc_get_desc
+          export GST_REGISTRY=$RUNNER_TEMP/reg.bin
+          gst-inspect-1.0 "$so"
+          GST_PLUGIN_PATH=$(dirname "$so") gst-inspect-1.0 ifdsrc | tee ifdsrc.txt
+          grep -q "ifd" ifdsrc.txt
+
+      - name: create fixtures
+        run: |
+          set -eux
+          m=$RUNNER_TEMP/media
+          mkdir -p $m/hls $m/dash
+          ffmpeg -v error -f lavfi -i testsrc=d=4:s=320x240:r=25 -f lavfi -i sine=f=440:d=4 \
+            -c:v libx264 -g 25 -pix_fmt yuv420p -c:a aac -shortest -movflags +faststart $m/a.mp4
+          ffmpeg -v error -f lavfi -i testsrc=d=8:s=320x240:r=25 -f lavfi -i sine=f=440:d=8 \
+            -c:v libx264 -g 25 -pix_fmt yuv420p -c:a aac -shortest -f mpegts $m/long.ts
+          ffmpeg -v error -i $m/a.mp4 -c copy -f hls -hls_time 1 -hls_playlist_type vod $m/hls/index.m3u8
+          ffmpeg -v error -i $m/a.mp4 -c copy -f dash -seg_duration 1 -use_template 1 -use_timeline 0 \
+            -init_seg_name 'init-$RepresentationID$.m4s' -media_seg_name 'chunk-$RepresentationID$-$Number%05d$.m4s' \
+            $m/dash/manifest.mpd
+          ls -R $m
+
+      - name: tests (gstplayer2)
+        run: python3 .github/ci/test_gstplayer2.py gstplayer/gst-1.0/gstplayer2 $RUNNER_TEMP/media gst-ifdsrc/gst-ifdsrc/src/.libs
+
+      - name: tests (gstplayer2 under ASan/UBSan)
+        # also when the plain run failed, a sanitizer report says more
+        if: success() || failure()
+        env:
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: python3 .github/ci/test_gstplayer2.py gstplayer/gst-1.0/gstplayer2-asan $RUNNER_TEMP/media gst-ifdsrc/gst-ifdsrc/src/.libs
