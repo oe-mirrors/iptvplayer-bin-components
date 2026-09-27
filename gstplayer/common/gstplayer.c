@@ -231,7 +231,7 @@ int main(int argc,char* argv[])
     int usedArgs = 2;
     if(usedArgs > argc)
     {
-    	printf("Usage: gstplayer filePath [-i audio-track index] [-l] [-t download-timeout] [-r ring-buffer-max-size (bytes) ] [-s buffer-size (bytes) ] [-d buffer-duration (seconds) ] [-p buffer-path] [-H http-header] [-v videosink] [-a audiosink] [-e]\n");
+    	printf("Usage: gstplayer filePath [-i audio-track index] [-l is-live (0|1)] [-t download-timeout (ms)] [-r ring-buffer-max-size (KB) ] [-s buffer-size (KB) ] [-d buffer-duration (seconds) ] [-p buffer-path] [-H http-header] [-v videosink] [-a audiosink] [-e]\n");
         exit(1);
     }
     filename = g_strdup(argv[1]);
@@ -258,7 +258,7 @@ int main(int argc,char* argv[])
             sscanf(optarg, "%d", &downloadTimeout);
             break;
         case 'l':
-            isLive = 1;
+            isLive = atoi(optarg) ? 1 : 0;
             break;
         case 'v':
             videoSinkName = g_strdup(optarg);
@@ -274,7 +274,7 @@ int main(int argc,char* argv[])
             break;
         case '?':
         default:
-            printf("Usage: gstplayer filePath [-i audio-track index] [-l] [-t download-timeout] [-r ring-buffer-max-size (bytes) ] [-s buffer-size (bytes) ] [-d buffer-duration (seconds) ] [-p buffer-path] [-H http-header] [-v videosink] [-a audiosink] [-e]\n");
+            printf("Usage: gstplayer filePath [-i audio-track index] [-l is-live (0|1)] [-t download-timeout (ms)] [-r ring-buffer-max-size (KB) ] [-s buffer-size (KB) ] [-d buffer-duration (seconds) ] [-p buffer-path] [-H http-header] [-v videosink] [-a audiosink] [-e]\n");
             exit(1);
         }
 
