@@ -72,6 +72,21 @@ jobs:
           ffmpeg -v error -i $m/a.mp4 -c copy -f dash -seg_duration 1 -use_template 1 -use_timeline 0 \
             -init_seg_name 'init-$RepresentationID$.m4s' -media_seg_name 'chunk-$RepresentationID$-$Number%05d$.m4s' \
             $m/dash/manifest.mpd
+          # MPDs the old hard-wired DASH pipeline could not play
+          V="-f lavfi -i testsrc=d=12:s=1280x720:r=25"
+          A="-f lavfi -i sine=f=440:d=12"
+          A2="-f lavfi -i sine=f=880:d=12"
+          D="-f dash -seg_duration 2 -use_template 1 -use_timeline 0"
+          D="$D -init_seg_name init-\$RepresentationID\$.m4s -media_seg_name chunk-\$RepresentationID\$-\$Number%05d\$.m4s"
+          mk() { mkdir -p $m/$1; shift; ffmpeg -v error -y "$@"; }
+          mk dash-vonly $V    -c:v libx264 -g 50 -pix_fmt yuv420p -an $D $m/dash-vonly/manifest.mpd
+          mk dash-aonly $A    -vn -c:a aac $D $m/dash-aonly/manifest.mpd
+          mk dash-hevc  $V $A -c:v libx265 -tag:v hvc1 -g 50 -pix_fmt yuv420p -c:a aac $D $m/dash-hevc/manifest.mpd
+          mk dash-eac3  $V $A -c:v libx264 -g 50 -pix_fmt yuv420p -c:a eac3 $D $m/dash-eac3/manifest.mpd
+          mk dash-multi $V $A $A2 -map 0:v -map 0:v -map 1:a -map 2:a \
+             -c:v libx264 -g 50 -pix_fmt yuv420p -s:v:0 1280x720 -b:v:0 1500k -s:v:1 1920x1080 -b:v:1 3000k \
+             -c:a aac -metadata:s:a:0 language=deu -metadata:s:a:1 language=eng \
+             -adaptation_sets "id=0,streams=v id=1,streams=2 id=2,streams=3" $D $m/dash-multi/manifest.mpd
           ls -R $m
 
       - name: tests (gstplayer2)

@@ -102,6 +102,25 @@ void UpdateVideoTrackInf_3(const unsigned int progressive)
 
 static int GetCurrentTrack(const char *type, int *idx)
 {
+    if (!isPlaybin())
+    {
+        /* DASH pipeline: one video track, the linked audio adaptation set */
+        g_mutex_lock(&g_dash_lock);
+        if (!strcmp(type, "current-audio"))
+        {
+            *idx = g_dash.audioLinked;
+        }
+        else if (!strcmp(type, "current-video"))
+        {
+            *idx = g_dash.videoLinked ? 0 : -1;
+        }
+        else
+        {
+            *idx = -1;
+        }
+        g_mutex_unlock(&g_dash_lock);
+        return *idx;
+    }
     //if (*idx == -1)
     {
         g_object_get(G_OBJECT (g_gst_playbin), type, idx, NULL);
@@ -125,6 +144,11 @@ static int SelectSubtitleStream(int i)
 static int SelectSubtitleTrack(unsigned int i)
 {
     int ret = -1;
+    if (!isPlaybin())
+    {
+        /* DASH pipeline: subtitle adaptation sets are not played */
+        return -1;
+    }
     if (g_subtitle_num > 0)
     {
         int validposition = 0;
@@ -172,6 +196,18 @@ static int SelectAudioStream(int i)
 static int SelectAudioTrack(unsigned int i)
 {
     int ret = -1;
+    if (!isPlaybin())
+    {
+        /* DASH pipeline: the audio set is chosen when the demuxer exposes
+         * its pads (-i); switching while playing is not supported yet */
+        if (g_audio_num == 0)
+        {
+            g_audio_idx = i;
+            return 0;
+        }
+        g_audio_idx = g_dash.audioLinked;
+        return ((int)i == g_dash.audioLinked) ? 0 : -1;
+    }
     if (g_audio_num > 0)
     {
         int validposition = 0;
@@ -222,8 +258,6 @@ static void FillAudioTracks()
     gint i = 0;
     gint n_audio = 0;
 
-    g_object_get(g_gst_playbin, "n-audio", &n_audio, NULL);
-
     //m_audioStreams.clear();
     if (NULL != g_audio_tracks)
     {
@@ -235,6 +269,43 @@ static void FillAudioTracks()
         free(g_audio_tracks);
         g_audio_tracks = NULL;
     }
+
+    if (!isPlaybin())
+    {
+        /* DASH pipeline: one track per audio adaptation set */
+        g_mutex_lock(&g_dash_lock);
+        n_audio = g_dash.audioPads ? (gint)g_dash.audioPads->len : 0;
+        g_audio_tracks = calloc(n_audio > 0 ? n_audio : 1, sizeof(TrackDescription_t));
+        for (i = 0; i < n_audio; i++)
+        {
+            GstPad *pad = g_ptr_array_index(g_dash.audioPads, i);
+            GstEvent *tagEvent = NULL;
+            gchar *lang = g_strdup(g_object_get_data(G_OBJECT(pad), "e2i-lang"));
+            guint idx = 0;
+            TrackDescription_t *track = &g_audio_tracks[i];
+            /* a pad can hold several tag events (global and stream scope,
+             * later ones from downstream elements) */
+            while (!lang && NULL != (tagEvent = gst_pad_get_sticky_event(pad, GST_EVENT_TAG, idx++)))
+            {
+                GstTagList *tags = NULL;
+                gst_event_parse_tag(tagEvent, &tags);
+                if (tags)
+                {
+                    gst_tag_list_get_string(tags, GST_TAG_LANGUAGE_CODE, &lang);
+                }
+                gst_event_unref(tagEvent);
+            }
+            track->Id = i;
+            SetStr(&(track->Name), lang ? lang : "und");
+            SetStr(&(track->Encoding), (i == g_dash.audioLinked && g_dash.audioEncoding) ? g_dash.audioEncoding : "audio/mp4");
+            g_free(lang);
+        }
+        g_mutex_unlock(&g_dash_lock);
+        g_audio_num = n_audio;
+        return;
+    }
+
+    g_object_get(g_gst_playbin, "n-audio", &n_audio, NULL);
 
     g_audio_tracks = malloc(sizeof(TrackDescription_t) * n_audio);
     memset(g_audio_tracks, 0, sizeof(TrackDescription_t) * n_audio);
@@ -302,12 +373,33 @@ static void FillVideoTracks()
     int n_video = 0;
     int i = 0;
     int j = 0;
-    g_object_get(g_gst_playbin, "n-video", &n_video, NULL);
 
     if (NULL != g_video_tracks)
     {
         return;
     }
+
+    if (!isPlaybin())
+    {
+        /* DASH pipeline: the one linked video stream */
+        g_mutex_lock(&g_dash_lock);
+        if (g_dash.vsink && g_dash.videoEncoding)
+        {
+            g_video_tracks = calloc(1, sizeof(TrackDescription_t));
+            g_video_tracks[0].Id = 0;
+            SetStr(&(g_video_tracks[0].Name), "und");
+            SetStr(&(g_video_tracks[0].Encoding), g_dash.videoEncoding);
+            g_video_tracks[0].width = g_dash.videoWidth;
+            g_video_tracks[0].height = g_dash.videoHeight;
+            g_video_tracks[0].frame_rate = g_dash.videoFrameRate;
+            g_video_tracks[0].progressive = -1;
+            g_video_num = 1;
+        }
+        g_mutex_unlock(&g_dash_lock);
+        return;
+    }
+
+    g_object_get(g_gst_playbin, "n-video", &n_video, NULL);
 
     if (n_video > 0)
     {
@@ -365,8 +457,6 @@ static void FillSubtitlesTracks()
     gint i = 0;
     gint n_subtitles = 0;
 
-    g_object_get(g_gst_playbin, "n-text", &n_subtitles, NULL);
-
     if (NULL != g_subtitle_tracks)
     {
         int i;
@@ -377,6 +467,15 @@ static void FillSubtitlesTracks()
         free(g_subtitle_tracks);
         g_subtitle_tracks = NULL;
     }
+
+    if (!isPlaybin())
+    {
+        /* DASH pipeline: subtitle adaptation sets are not played */
+        g_subtitle_num = 0;
+        return;
+    }
+
+    g_object_get(g_gst_playbin, "n-text", &n_subtitles, NULL);
 
     g_subtitle_tracks = malloc(sizeof(TrackDescription_t) * n_subtitles);
     memset(g_subtitle_tracks, 0, sizeof(TrackDescription_t) * n_subtitles);

@@ -97,6 +97,8 @@ const PlaybackInfo_t* backend_get_playback_info();
 void backend_gst_poll();
 int backend_set_download_timeout(const uint64_t mseconds);
 int backend_set_is_live(const uint8_t live);
+/* DASH: limit the video representation (0 = no limit) */
+int backend_set_dash_max_video(const int width, const int height);
 /* returns a newly allocated copy of str escaped for a JSON string value (g_free it) */
 gchar *json_escape(const gchar *str);
 
