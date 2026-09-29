@@ -79,6 +79,8 @@ static struct
     const gchar *asinkFactory;
     GPtrArray  *audioPads;      /* dashdemux audio_* pads in the order they appear */
     gint        audioLinked;    /* index into audioPads of the played one, -1 none */
+    gint        audioWanted;    /* -i, taken at the start: g_audio_idx follows the
+                                 * linked set and changes while the pads show up */
     gboolean    videoLinked;
     gchar      *videoEncoding;
     gchar      *audioEncoding;
@@ -388,7 +390,10 @@ static GstBusSyncReply gstBusSyncHandler(GstBus *bus, GstMessage *message, gpoin
     if(0 < g_sfd)
     {
         int savedErrno = errno; /* In case we change 'errno' */
-        write(g_sfd, "x", 1);   /* wake up main loop */
+        if (write(g_sfd, "x", 1) < 0)   /* wake up main loop */
+        {
+            /* the pipe is full: the main loop is awake anyway */
+        }
         errno = savedErrno;
     }
 
@@ -517,6 +522,8 @@ static gboolean gstBusCall(GstBus *bus, GstMessage *msg)
                     {
                         g_playback_info.isPlaying = 0;
                     }   break;
+                    default:
+                        break;
                 }
                 InfoStructChanged();
             }
@@ -551,10 +558,15 @@ static gboolean gstBusCall(GstBus *bus, GstMessage *msg)
     {
         break;
     }
+    case GST_MESSAGE_STREAM_START:
+    {
+        TracksMarkDirty();
+        break;
+    }
     case GST_MESSAGE_ASYNC_DONE:
     {
         g_playback_info.AVSync = 1;
-        TracksMessageAsyncDone();
+        TracksRefresh();
         InfoStructChanged();
         backend_query_duration(NULL);
         backend_query_position(NULL);
@@ -562,6 +574,7 @@ static gboolean gstBusCall(GstBus *bus, GstMessage *msg)
         if (0 == g_playback_info.isReady)
         {
             g_playback_info.isReady = 1;
+            TracksStartRetries();
             if (g_playback_info.isPaused)
             {
                 gst_element_set_state(g_gst_playbin, GST_STATE_PLAYING);
@@ -652,7 +665,7 @@ static gboolean gstBusCall(GstBus *bus, GstMessage *msg)
                 gst_structure_get_clock_time(msgstruct, "duration", &duration);
                 text = gst_structure_get_string(msgstruct, "text");
                 gchar *escapedText = json_escape(text);
-                fprintf(stderr, "{\"PLAYBACK_SUBTITLE\":{\"start\":%lld, \"duration\":%lld, \"text\":\"%s\"}}\n", GST_TIME_AS_MSECONDS(start), GST_TIME_AS_MSECONDS(duration), escapedText);
+                fprintf(stderr, "{\"PLAYBACK_SUBTITLE\":{\"start\":%lld, \"duration\":%lld, \"text\":\"%s\"}}\n", (long long)GST_TIME_AS_MSECONDS(start), (long long)GST_TIME_AS_MSECONDS(duration), escapedText);
                 g_free(escapedText);
             }
         }
@@ -675,6 +688,7 @@ void backend_gst_poll()
         gst_message_unref (message);
     }
     gst_object_unref(bus);
+    TracksPoll();
 }
 
 const PlaybackInfo_t* backend_get_playback_info()
@@ -735,6 +749,38 @@ static void dashReset(void)
     g_dash.videoHeight = 0;
     g_dash.videoFrameRate = 0;
     g_mutex_unlock(&g_dash_lock);
+}
+
+/* size and frame rate of the played video; g_dash_lock is held */
+static void dashStoreVideoCaps(const GstStructure *s)
+{
+    guint frameRate = TracksFrameRate(s);
+    gst_structure_get_int(s, "width", &g_dash.videoWidth);
+    gst_structure_get_int(s, "height", &g_dash.videoHeight);
+    if (frameRate > 0)
+    {
+        g_dash.videoFrameRate = frameRate;
+    }
+}
+
+/* dashdemux switches representations (720p -> 1080p) on the same pad: keep
+ * the size of the played video up to date */
+static GstPadProbeReturn dashVideoCapsProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data)
+{
+    GstEvent *event = GST_PAD_PROBE_INFO_EVENT(info);
+    if (event && GST_EVENT_CAPS == GST_EVENT_TYPE(event))
+    {
+        GstCaps *caps = NULL;
+        gst_event_parse_caps(event, &caps);
+        if (caps && !gst_caps_is_empty(caps))
+        {
+            g_mutex_lock(&g_dash_lock);
+            dashStoreVideoCaps(gst_caps_get_structure(caps, 0));
+            g_mutex_unlock(&g_dash_lock);
+            TracksMarkDirty();
+        }
+    }
+    return GST_PAD_PROBE_OK;
 }
 
 /*
@@ -811,17 +857,10 @@ static void dashParsedPadAdded(GstElement *parsebin, GstPad *pad, gpointer data)
 
     if (isVideo)
     {
-        gint num = 0;
-        gint denom = 0;
         g_dash.vsink = sink;
         g_free(g_dash.videoEncoding);
         g_dash.videoEncoding = g_strdup(media);
-        gst_structure_get_int(s, "width", &g_dash.videoWidth);
-        gst_structure_get_int(s, "height", &g_dash.videoHeight);
-        if (gst_structure_get_fraction(s, "framerate", &num, &denom) && num > 0 && denom > 0)
-        {
-            g_dash.videoFrameRate = (guint)(num * 1000LL / denom);
-        }
+        dashStoreVideoCaps(s);
     }
     else
     {
@@ -855,6 +894,11 @@ static void dashParsedPadAdded(GstElement *parsebin, GstPad *pad, gpointer data)
     }
     gst_object_unref(sinkpad);
     gst_caps_unref(caps);
+    if (isVideo)
+    {
+        gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, dashVideoCapsProbe, NULL, NULL);
+    }
+    TracksMarkDirty();
 }
 
 /* queue ! parsebin behind one dashdemux pad */
@@ -904,6 +948,7 @@ static GstPadProbeReturn dashTagProbe(GstPad *pad, GstPadProbeInfo *info, gpoint
         if (tags && gst_tag_list_get_string(tags, GST_TAG_LANGUAGE_CODE, &lang))
         {
             g_object_set_data_full(G_OBJECT(pad), "e2i-lang", lang, g_free);
+            TracksMarkDirty();
         }
     }
     return GST_PAD_PROBE_OK;
@@ -930,7 +975,7 @@ static void dashDemuxPadAdded(GstElement *demux, GstPad *pad, gpointer data)
     else if (g_str_has_prefix(name, "audio") && g_dash.audioPads)
     {
         gint idx = (gint)g_dash.audioPads->len;
-        gint wanted = g_audio_idx >= 0 ? g_audio_idx : 0;
+        gint wanted = g_dash.audioWanted;
         g_ptr_array_add(g_dash.audioPads, gst_object_ref(pad));
         gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, dashTagProbe, NULL, NULL);
         if (g_dash.audioLinked < 0 && idx == wanted)
@@ -945,6 +990,7 @@ static void dashDemuxPadAdded(GstElement *demux, GstPad *pad, gpointer data)
     {
         dashLinkBranch(pad, linkVideo);
     }
+    TracksMarkDirty();
 }
 
 static void dashDemuxNoMorePads(GstElement *demux, gpointer data)
@@ -986,6 +1032,7 @@ static GstElement* createDashPlaybackPipeline(const gchar* uri, const gchar *vid
     g_mutex_lock(&g_dash_lock);
     g_dash.demux = demux;
     g_dash.audioPads = g_ptr_array_new_with_free_func(gst_object_unref);
+    g_dash.audioWanted = g_audio_idx >= 0 ? g_audio_idx : 0;
     g_dash.vsinkFactory = pickFactory(videosink, "dreamvideosink", "dvbvideosink");
     g_dash.asinkFactory = pickFactory(audiosink, "dreamaudiosink", "dvbaudiosink");
     g_mutex_unlock(&g_dash_lock);
@@ -1019,6 +1066,7 @@ void backend_init(int *argc, char **argv[], const int sfd)
 int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buffer_max_size, gint64 buffer_duration, gint buffer_size, StrPair_t **http_header_fields, gchar *videosink, gchar *audiosink, gboolean subtitles_enabled)
 {
     backend_stop();
+    TracksReset();
     g_filename               = filename;
     g_download_buffer_path   = download_buffer_path;
     g_ring_buffer_max_size   = ring_buffer_max_size;
@@ -1061,6 +1109,7 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
     if(g_gst_playbin)
     {
         g_signal_connect(g_gst_playbin, "about-to-finish", G_CALLBACK(gstAboutToFinishCallback), NULL);
+        TracksConnectPlaybin(g_gst_playbin);
         if( strstr(filename, "://") )
         {
             if(g_ptr_http_header_fields)
@@ -1179,17 +1228,14 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
             g_free(uri);
         }
 
-        GstStateChangeReturn sts = gst_element_set_state(g_gst_playbin, GST_STATE_PAUSED);
-        //if(sts)
-        {
-            g_playback_info.isReady = 0;
-            g_playback_info.isPlaying = 1;
-            g_playback_info.isPaused = 0;
-            g_playback_info.BufferingPercent = -1;
-            ChangeSpeed(TRUE, 1.0);
-            InfoStructChanged();
-            return 0;
-        }
+        gst_element_set_state(g_gst_playbin, GST_STATE_PAUSED);
+        g_playback_info.isReady = 0;
+        g_playback_info.isPlaying = 1;
+        g_playback_info.isPaused = 0;
+        g_playback_info.BufferingPercent = -1;
+        ChangeSpeed(TRUE, 1.0);
+        InfoStructChanged();
+        return 0;
     }
     return -1;
 }
@@ -1418,7 +1464,7 @@ int backend_query_position(int64_t *mseconds)
                     }
                     else
                     {
-                        fprintf(stderr, "{\"J\":{\"ms\":%lld}}\n", (int64_t)GST_TIME_AS_MSECONDS(decoder_time));
+                        fprintf(stderr, "{\"J\":{\"ms\":%lld}}\n", (long long)GST_TIME_AS_MSECONDS(decoder_time));
                     }
                 }
             }

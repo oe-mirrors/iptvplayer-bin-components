@@ -1,12 +1,10 @@
 #ifndef GST_TRACKS_COMMON_FUNCTIONS
 #define GST_TRACKS_COMMON_FUNCTIONS
 
-#include <malloc.h>
 #include "gst-backend.h"
 
 
 /* Track */
-int tracksReady = 0;
 TrackDescription_t *g_audio_tracks = NULL;
 TrackDescription_t *g_video_tracks = NULL;
 TrackDescription_t *g_subtitle_tracks = NULL;
@@ -18,25 +16,64 @@ int g_video_idx = -1;
 int g_subtitle_idx = -1;
 
 
-static void freeTrackDescription(TrackDescription_t *track)
+/* free a track list; the lists are rebuilt each time the tracks are read */
+static void TracksFree(TrackDescription_t **tracks, int *num)
 {
-    if (NULL != track)
+    int i;
+    for (i = 0; NULL != *tracks && i < *num; i++)
     {
-        free(track->Name);
-        free(track->Encoding);
+        g_free((*tracks)[i].Name);
+        g_free((*tracks)[i].Encoding);
     }
+    g_free(*tracks);
+    *tracks = NULL;
+    *num = 0;
 }
 
-static void UpdateVideoTrackInf()
+/* track lines last sent to the caller: after playback start the tracks are
+ * read again whenever something may have changed, and only what really
+ * changed is reported */
+enum
 {
-    backend_get_current_track('v');
-}
+    TRACK_LINE_A_L = 0,
+    TRACK_LINE_A_C,
+    TRACK_LINE_S_L,
+    TRACK_LINE_S_C,
+    TRACK_LINE_V_C,
+    TRACK_LINE_NUM
+};
+static gchar *g_track_lines[TRACK_LINE_NUM];
+
+/* set (from any thread) when a stream, its caps or its tags changed */
+static gint g_tracks_dirty = 0;
+
+/* reading the tracks again after the start, for caps that come late
+ * (growing ifd:// files, streams without an early ASYNC_DONE) */
+static gint64 g_tracks_retry_at = 0;
+static gint64 g_tracks_retry_step = 0;
+
+/* what the video sink reported (eventSizeChanged, ...): caps read again later
+ * must not undo it */
+static struct
+{
+    int width;
+    int height;
+    unsigned int frame_rate;
+    int progressive;
+} g_video_sink_inf = { 0, 0, 0, -1 };
+
+static TrackDescription_t* ReportCurrentTrack(const char type, gboolean force);
 
 static TrackDescription_t* GetVideoTrackForUpdate()
 {
-    if(g_video_tracks && g_video_idx < g_video_num && g_video_idx >= 0)
+    /* the list skips streams without caps, g_video_idx is the playbin index */
+    int i;
+    for (i = 0; g_video_tracks && i < g_video_num; ++i)
     {
-        return &g_video_tracks[g_video_idx];
+        if (g_video_tracks[i].Id == g_video_idx)
+        {
+            return &g_video_tracks[i];
+        }
     }
     return NULL;
 }
@@ -44,60 +81,112 @@ static TrackDescription_t* GetVideoTrackForUpdate()
 void UpdateVideoTrackInf_1(const int aspect, const int width, const int height)
 {
     TrackDescription_t *pVidTrack = GetVideoTrackForUpdate();
+    g_video_sink_inf.width = width;
+    g_video_sink_inf.height = height;
     if(pVidTrack)
     {
-        int updated = 0;
-        if(pVidTrack->width != width)
-        {
-            pVidTrack->width = width;
-            updated = 1;
-        }
-        if(pVidTrack->height != height)
-        {
-            pVidTrack->height = height;
-            updated = 1;
-        }
-        if(updated)
-        {
-            UpdateVideoTrackInf();
-        }
+        pVidTrack->width = width;
+        pVidTrack->height = height;
+        ReportCurrentTrack('v', FALSE);
     }
 }
 
 void UpdateVideoTrackInf_2(const unsigned int framerate)
 {
     TrackDescription_t *pVidTrack = GetVideoTrackForUpdate();
+    g_video_sink_inf.frame_rate = framerate;
     if(pVidTrack)
     {
-        int updated = 0;
-        if(pVidTrack->frame_rate != framerate)
-        {
-            pVidTrack->frame_rate = framerate;
-            updated = 1;
-        }
-        if(updated)
-        {
-            UpdateVideoTrackInf();
-        }
+        pVidTrack->frame_rate = framerate;
+        ReportCurrentTrack('v', FALSE);
     }
 }
 
 void UpdateVideoTrackInf_3(const unsigned int progressive)
 {
     TrackDescription_t *pVidTrack = GetVideoTrackForUpdate();
+    g_video_sink_inf.progressive = (int)progressive;
     if(pVidTrack)
     {
-        int updated = 0;
-        if(pVidTrack->progressive != progressive)
-        {
-            pVidTrack->progressive = progressive;
-            updated = 1;
-        }
-        if(updated)
-        {
-            UpdateVideoTrackInf();
-        }
+        pVidTrack->progressive = (int)progressive;
+        ReportCurrentTrack('v', FALSE);
     }
+}
+
+static void TracksMarkDirty(void)
+{
+    /* one wake-up per batch of changes; the main loop reads the tracks */
+    if (g_atomic_int_compare_and_exchange(&g_tracks_dirty, 0, 1) && g_gst_playbin)
+    {
+        gst_element_post_message(g_gst_playbin,
+            gst_message_new_application(GST_OBJECT(g_gst_playbin), gst_structure_new_empty("e2i-tracks")));
+    }
+}
+
+static void TracksCapsNotify(GObject *pad, GParamSpec *pspec, gpointer data)
+{
+    TracksMarkDirty();
+}
+
+/* read the tracks again whenever a stream gets caps: late ones (growing
+ * file) and new ones (resolution switch). notify::caps comes after the pad
+ * stored them, so the refresh it triggers finds them. Main thread only. */
+static void TracksWatchCaps(GstPad *pad)
+{
+    if (pad && !g_object_get_data(G_OBJECT(pad), "e2i-caps-watch"))
+    {
+        g_object_set_data(G_OBJECT(pad), "e2i-caps-watch", GINT_TO_POINTER(1));
+        g_signal_connect(pad, "notify::caps", G_CALLBACK(TracksCapsNotify), NULL);
+    }
+}
+
+/* fps * 1000 as the dvb sinks report it (30000/1001 -> 29970) */
+static guint TracksFrameRate(const GstStructure *str)
+{
+    gint num = 0;
+    gint denom = 0;
+    if (gst_structure_get_fraction(str, "framerate", &num, &denom) && num > 0 && denom > 0)
+    {
+        return (guint)((num * 1000LL + denom / 2) / denom);
+    }
+    return 0;
+}
+
+static void TracksStreamsChangedCallback(GstElement *playbin, gpointer data)
+{
+    TracksMarkDirty();
+}
+
+static void TracksTagsChangedCallback(GstElement *playbin, gint stream, gpointer data)
+{
+    TracksMarkDirty();
+}
+
+static void TracksConnectPlaybin(GstElement *playbin)
+{
+    g_signal_connect(playbin, "audio-changed", G_CALLBACK(TracksStreamsChangedCallback), NULL);
+    g_signal_connect(playbin, "video-changed", G_CALLBACK(TracksStreamsChangedCallback), NULL);
+    g_signal_connect(playbin, "text-changed", G_CALLBACK(TracksStreamsChangedCallback), NULL);
+    g_signal_connect(playbin, "audio-tags-changed", G_CALLBACK(TracksTagsChangedCallback), NULL);
+    g_signal_connect(playbin, "video-tags-changed", G_CALLBACK(TracksTagsChangedCallback), NULL);
+    g_signal_connect(playbin, "text-tags-changed", G_CALLBACK(TracksTagsChangedCallback), NULL);
+}
+
+static void TracksReset(void)
+{
+    int i;
+    for (i = 0; i < TRACK_LINE_NUM; ++i)
+    {
+        g_free(g_track_lines[i]);
+        g_track_lines[i] = NULL;
+    }
+    g_atomic_int_set(&g_tracks_dirty, 0);
+    g_tracks_retry_at = 0;
+    g_tracks_retry_step = 0;
+    g_video_sink_inf.width = 0;
+    g_video_sink_inf.height = 0;
+    g_video_sink_inf.frame_rate = 0;
+    g_video_sink_inf.progressive = -1;
 }
 
 static int GetCurrentTrack(const char *type, int *idx)
@@ -121,10 +210,7 @@ static int GetCurrentTrack(const char *type, int *idx)
         g_mutex_unlock(&g_dash_lock);
         return *idx;
     }
-    //if (*idx == -1)
-    {
-        g_object_get(G_OBJECT (g_gst_playbin), type, idx, NULL);
-    }
+    g_object_get(G_OBJECT (g_gst_playbin), type, idx, NULL);
     return *idx;
 }
 
@@ -243,11 +329,8 @@ static int SetStr(char **set, const char *val)
     int ret = -1;
     if (NULL != set && NULL != val)
     {
-        if (NULL != (*set))
-        {
-            free(*set);
-        }
-        *set = strdup(val);
+        g_free(*set);
+        *set = g_strdup(val);
         ret = 0;
     }
     return ret;
@@ -258,24 +341,14 @@ static void FillAudioTracks()
     gint i = 0;
     gint n_audio = 0;
 
-    //m_audioStreams.clear();
-    if (NULL != g_audio_tracks)
-    {
-        int i;
-        for (i=0; i < g_audio_num; i++)
-        {
-            freeTrackDescription(&(g_audio_tracks[i]));
-        }
-        free(g_audio_tracks);
-        g_audio_tracks = NULL;
-    }
+    TracksFree(&g_audio_tracks, &g_audio_num);
 
     if (!isPlaybin())
     {
         /* DASH pipeline: one track per audio adaptation set */
         g_mutex_lock(&g_dash_lock);
         n_audio = g_dash.audioPads ? (gint)g_dash.audioPads->len : 0;
-        g_audio_tracks = calloc(n_audio > 0 ? n_audio : 1, sizeof(TrackDescription_t));
+        g_audio_tracks = g_new0(TrackDescription_t, n_audio);
         for (i = 0; i < n_audio; i++)
         {
             GstPad *pad = g_ptr_array_index(g_dash.audioPads, i);
@@ -307,8 +380,7 @@ static void FillAudioTracks()
 
     g_object_get(g_gst_playbin, "n-audio", &n_audio, NULL);
 
-    g_audio_tracks = malloc(sizeof(TrackDescription_t) * n_audio);
-    memset(g_audio_tracks, 0, sizeof(TrackDescription_t) * n_audio);
+    g_audio_tracks = g_new0(TrackDescription_t, n_audio);
 
     int j = 0;
     for (i = 0; i < n_audio; i++)
@@ -327,6 +399,7 @@ static void FillAudioTracks()
 #else
         GstCaps* caps = gst_pad_get_current_caps(pad);
 #endif
+        TracksWatchCaps(pad);
         gst_object_unref(pad);
         if (!caps)
         {
@@ -374,10 +447,8 @@ static void FillVideoTracks()
     int i = 0;
     int j = 0;
 
-    if (NULL != g_video_tracks)
-    {
-        return;
-    }
+    /* read again every time: the caps may not have been there before */
+    TracksFree(&g_video_tracks, &g_video_num);
 
     if (!isPlaybin())
     {
@@ -385,7 +456,7 @@ static void FillVideoTracks()
         g_mutex_lock(&g_dash_lock);
         if (g_dash.vsink && g_dash.videoEncoding)
         {
-            g_video_tracks = calloc(1, sizeof(TrackDescription_t));
+            g_video_tracks = g_new0(TrackDescription_t, 1);
             g_video_tracks[0].Id = 0;
             SetStr(&(g_video_tracks[0].Name), "und");
             SetStr(&(g_video_tracks[0].Encoding), g_dash.videoEncoding);
@@ -396,18 +467,19 @@ static void FillVideoTracks()
             g_video_num = 1;
         }
         g_mutex_unlock(&g_dash_lock);
-        return;
     }
-
-    g_object_get(g_gst_playbin, "n-video", &n_video, NULL);
+    else
+    {
+        g_object_get(g_gst_playbin, "n-video", &n_video, NULL);
+    }
 
     if (n_video > 0)
     {
-        g_video_tracks = malloc(sizeof(TrackDescription_t) * n_video);
-        memset(g_video_tracks, 0, sizeof(TrackDescription_t) * n_video);
+        g_video_tracks = g_new0(TrackDescription_t, n_video);
 
         for (i = 0; i < n_video; i++)
         {
+            videopad = NULL;
             g_signal_emit_by_name(g_gst_playbin, "get-video-pad", i, &videopad);
             if (videopad)
             {
@@ -416,14 +488,13 @@ static void FillVideoTracks()
 #else
                 GstCaps* caps = gst_pad_get_current_caps(videopad);
 #endif
+                TracksWatchCaps(videopad);
                 if (caps)
                 {
                     GstStructure *str = gst_caps_get_structure (caps, 0);
                     if(str)
                     {
                         const gchar *g_type = gst_structure_get_name(str);
-                        int num = 0;
-                        int denom = 0;
 
                         TrackDescription_t *track = &g_video_tracks[j];
                         track->Id = i;
@@ -432,14 +503,7 @@ static void FillVideoTracks()
 
                         gst_structure_get_int(str, "width",  &track->width);
                         gst_structure_get_int(str, "height", &track->height);
-                        if(gst_structure_get_fraction(str, "framerate", &num, &denom) && num > 0 && denom > 0)
-                        {
-                            if(denom == 1001)
-                            {
-                                denom = 1000;
-                            }
-                            track->frame_rate = num * 1000L / denom;
-                        }
+                        track->frame_rate = TracksFrameRate(str);
                         track->progressive = -1;
                         ++j;
                     }
@@ -450,6 +514,30 @@ static void FillVideoTracks()
         }
         g_video_num = j;
     }
+
+    /* what the sink reported wins: it shows what is really decoded */
+    if (g_video_num > 0)
+    {
+        TrackDescription_t *track = NULL;
+        GetCurrentTrack("current-video", &g_video_idx);
+        track = GetVideoTrackForUpdate();
+        if (track)
+        {
+            if (g_video_sink_inf.width > 0 && g_video_sink_inf.height > 0)
+            {
+                track->width = g_video_sink_inf.width;
+                track->height = g_video_sink_inf.height;
+            }
+            if (g_video_sink_inf.frame_rate > 0)
+            {
+                track->frame_rate = g_video_sink_inf.frame_rate;
+            }
+            if (g_video_sink_inf.progressive >= 0)
+            {
+                track->progressive = g_video_sink_inf.progressive;
+            }
+        }
+    }
 }
 
 static void FillSubtitlesTracks()
@@ -457,16 +545,7 @@ static void FillSubtitlesTracks()
     gint i = 0;
     gint n_subtitles = 0;
 
-    if (NULL != g_subtitle_tracks)
-    {
-        int i;
-        for (i=0; i < g_subtitle_num; i++)
-        {
-            freeTrackDescription(&(g_subtitle_tracks[i]));
-        }
-        free(g_subtitle_tracks);
-        g_subtitle_tracks = NULL;
-    }
+    TracksFree(&g_subtitle_tracks, &g_subtitle_num);
 
     if (!isPlaybin())
     {
@@ -477,8 +556,7 @@ static void FillSubtitlesTracks()
 
     g_object_get(g_gst_playbin, "n-text", &n_subtitles, NULL);
 
-    g_subtitle_tracks = malloc(sizeof(TrackDescription_t) * n_subtitles);
-    memset(g_subtitle_tracks, 0, sizeof(TrackDescription_t) * n_subtitles);
+    g_subtitle_tracks = g_new0(TrackDescription_t, n_subtitles);
 
     int j = 0;
     for (i = 0; i < n_subtitles; i++)
@@ -493,6 +571,7 @@ static void FillSubtitlesTracks()
             continue;
         }
         GstCaps* caps = gst_pad_get_current_caps(pad);
+        TracksWatchCaps(pad);
         gst_object_unref(pad);
         if (!caps)
         {
@@ -527,53 +606,117 @@ static void FillSubtitlesTracks()
     g_subtitle_num = j;
 }
 
-static void TracksMessageAsyncDone()
+static gchar* TracksListLine(const char type, const TrackDescription_t *pTracks, const int num)
 {
-    if (0 == g_audio_num)
+    GString *out = g_string_new(NULL);
+    int i = 0;
+    g_string_append_printf(out, "{\"%c_l\": [", type);
+    for (i = 0; i < num; ++i)
     {
-        int audio_idx = g_audio_idx;
-        FillAudioTracks();
-        backend_get_tracks_list('a', NULL);
+        gchar *e = json_escape(pTracks[i].Encoding);
+        gchar *n = json_escape(pTracks[i].Name);
+        g_string_append_printf(out, "%s{\"id\":%d,\"e\":\"%s\",\"n\":\"%s\"}", (0 < i) ? ", " : "", pTracks[i].Id, e, n);
+        g_free(e);
+        g_free(n);
+    }
+    g_string_append(out, "]}");
+    return g_string_free(out, FALSE);
+}
+
+/* send a track line; unless asked for it, only when it changed */
+static void TrackLineSend(const int slot, gchar *line, const gboolean force)
+{
+    if (force || g_strcmp0(line, g_track_lines[slot]))
+    {
+        fprintf(stderr, "%s\n", line);
+        g_free(g_track_lines[slot]);
+        g_track_lines[slot] = line;
+    }
+    else
+    {
+        g_free(line);
+    }
+}
+
+/*
+ * Read all tracks again and report what changed. Called on ASYNC_DONE, when
+ * playbin/dashdemux announce new streams, caps or tags, and a few times
+ * after the start - a stream is often not complete at the first ASYNC_DONE
+ * (growing ifd:// file, sinks that preroll without data), and before this
+ * the tracks were only read then and never again.
+ * A track chosen before the list was known (-i, or "a<N>" too early) is
+ * selected once the list is there.
+ */
+static void TracksRefresh(void)
+{
+    int wanted = -1;
+
+    wanted = (0 == g_audio_num) ? g_audio_idx : -1;
+    FillAudioTracks();
+    /* an empty list is no news (pads without caps for a moment, after EOS) */
+    if (g_audio_num > 0)
+    {
+        TrackLineSend(TRACK_LINE_A_L, TracksListLine('a', g_audio_tracks, g_audio_num), FALSE);
         GetCurrentTrack("current-audio", &g_audio_idx);
-        if (audio_idx >= 0 && audio_idx != g_audio_idx)
+        if (wanted >= 0 && wanted != g_audio_idx)
         {
-            backend_set_track('a', audio_idx);
-            //SelectAudioStream(audio_idx);
+            backend_set_track('a', wanted);
         }
-        backend_get_current_track('a');
+        ReportCurrentTrack('a', FALSE);
     }
 
-    if (0 == g_subtitle_num)
+    wanted = (0 == g_subtitle_num) ? g_subtitle_idx : -1;
+    FillSubtitlesTracks();
+    if (g_subtitle_num > 0)
     {
-        int subtitle_idx = g_subtitle_idx;
-        FillSubtitlesTracks();
-        backend_get_tracks_list('s', NULL);
+        TrackLineSend(TRACK_LINE_S_L, TracksListLine('s', g_subtitle_tracks, g_subtitle_num), FALSE);
         GetCurrentTrack("current-text", &g_subtitle_idx);
-        if (subtitle_idx >= 0 && subtitle_idx != g_subtitle_idx)
+        if (wanted >= 0 && wanted != g_subtitle_idx)
         {
-            backend_set_track('s', subtitle_idx);
+            backend_set_track('s', wanted);
         }
-        backend_get_current_track('s');
+        ReportCurrentTrack('s', FALSE);
     }
-    if (0 == g_video_num)
+
+    FillVideoTracks();
+    if (g_video_num > 0)
     {
-        int video_idx = g_video_idx;
-        FillVideoTracks();
-        backend_get_tracks_list('v', NULL);
-        GetCurrentTrack("current-video", &g_video_idx);
-        if (video_idx >= 0 && video_idx != g_video_idx)
+        ReportCurrentTrack('v', FALSE);
+    }
+}
+
+/* the stream runs: look at the tracks again 0.5, 1.5, 3.5, ... 31.5 s later */
+static void TracksStartRetries(void)
+{
+    g_tracks_retry_step = 500;
+    g_tracks_retry_at = g_get_monotonic_time() / 1000 + g_tracks_retry_step;
+}
+
+/* main loop, after the bus messages */
+static void TracksPoll(void)
+{
+    gboolean due = g_atomic_int_compare_and_exchange(&g_tracks_dirty, 1, 0);
+    if (g_tracks_retry_at > 0)
+    {
+        gint64 now = g_get_monotonic_time() / 1000;
+        if (now >= g_tracks_retry_at)
         {
-            backend_set_track('v', video_idx);
+            due = TRUE;
+            g_tracks_retry_step *= 2;
+            g_tracks_retry_at = (g_tracks_retry_step <= 16000) ? now + g_tracks_retry_step : 0;
         }
-        backend_get_current_track('v');
+    }
+    if (due && g_gst_playbin && g_playback_info.isPlaying)
+    {
+        TracksRefresh();
     }
 }
 
 TrackDescription_t* backend_get_tracks_list(const char type, int *num)
 {
     int localNum = 0;
+    int slot = TRACK_LINE_A_L;
     TrackDescription_t *pTracks = NULL;
-    /* At now we need only audio track list */
     if ('a' == type)
     {
         FillAudioTracks();
@@ -585,6 +728,7 @@ TrackDescription_t* backend_get_tracks_list(const char type, int *num)
         FillSubtitlesTracks();
         pTracks = g_subtitle_tracks;
         localNum = g_subtitle_num;
+        slot = TRACK_LINE_S_L;
     }
 
     if (NULL != num)
@@ -592,32 +736,19 @@ TrackDescription_t* backend_get_tracks_list(const char type, int *num)
         *num = localNum;
     }
 
-    if (NULL != pTracks)
+    if ('a' == type || 's' == type)
     {
-        int i = 0;
-        fprintf(stderr, "{\"%c_l\": [", type);
-        for (i = 0; i < localNum; ++i)
-        {
-            if(0 < i)
-            {
-                fprintf(stderr, ", ");
-            }
-            gchar *e = json_escape(pTracks[i].Encoding);
-            gchar *n = json_escape(pTracks[i].Name);
-            fprintf(stderr, "{\"id\":%d,\"e\":\"%s\",\"n\":\"%s\"}", pTracks[i].Id , e, n);
-            g_free(e);
-            g_free(n);
-        }
-        fprintf(stderr, "]}\n");
+        TrackLineSend(slot, TracksListLine(type, pTracks, localNum), TRUE);
     }
 
     return pTracks;
 }
 
-TrackDescription_t* backend_get_current_track(const char type)
+static TrackDescription_t* ReportCurrentTrack(const char type, gboolean force)
 {
     int idx = -1;
     int num = 0;
+    int slot = TRACK_LINE_V_C;
     TrackDescription_t *pTracks = NULL;
 
     TrackDescription_t *track = NULL;
@@ -626,12 +757,14 @@ TrackDescription_t* backend_get_current_track(const char type)
         pTracks = g_audio_tracks;
         idx     = GetCurrentTrack("current-audio", &g_audio_idx);
         num     = g_audio_num;
+        slot    = TRACK_LINE_A_C;
     }
     else if ('s' == type)
     {
         pTracks = g_subtitle_tracks;
         idx     = GetCurrentTrack("current-text", &g_subtitle_idx);
         num     = g_subtitle_num;
+        slot    = TRACK_LINE_S_C;
     }
     else if ('v' == type)
     {
@@ -659,19 +792,26 @@ TrackDescription_t* backend_get_current_track(const char type)
     {
         gchar *e = json_escape(track->Encoding);
         gchar *n = json_escape(track->Name);
+        gchar *line = NULL;
         if ('a' == type || 's' == type)
         {
-            fprintf(stderr, "{\"%c_%c\":{\"id\":%d,\"e\":\"%s\",\"n\":\"%s\"}}\n", type, 'c', track->Id , e, n);
+            line = g_strdup_printf("{\"%c_%c\":{\"id\":%d,\"e\":\"%s\",\"n\":\"%s\"}}", type, 'c', track->Id , e, n);
         }
         else // video
         {
             // information about only current video track will be stored
-            fprintf(stderr, "{\"%c_%c\":{\"id\":%d,\"e\":\"%s\",\"n\":\"%s\",\"w\":%d,\"h\":%d,\"f\":%u,\"p\":%d}}\n", type, 'c', track->Id , e, n, track->width, track->height, track->frame_rate, track->progressive);
+            line = g_strdup_printf("{\"%c_%c\":{\"id\":%d,\"e\":\"%s\",\"n\":\"%s\",\"w\":%d,\"h\":%d,\"f\":%u,\"p\":%d}}", type, 'c', track->Id , e, n, track->width, track->height, track->frame_rate, track->progressive);
         }
+        TrackLineSend(slot, line, force);
         g_free(e);
         g_free(n);
     }
     return track;
+}
+
+TrackDescription_t* backend_get_current_track(const char type)
+{
+    return ReportCurrentTrack(type, TRUE);
 }
 
 int backend_set_track(const char type, const int id)

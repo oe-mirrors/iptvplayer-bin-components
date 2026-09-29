@@ -10,6 +10,7 @@ fixtures and records the request headers of every request.
 usage: test_gstplayer2.py <gstplayer2 binary> <fixture dir> [<ifdsrc plugin dir>]
 """
 import http.server
+import itertools
 import json
 import os
 import shutil
@@ -127,9 +128,9 @@ def check(name, cond, detail=''):
 
 def common_checks(tag, run, expect_eos=True):
     check('%s: no invalid JSON lines' % tag, not run.bad_json, repr(run.bad_json[:3]))
-    check('%s: version 10022' % tag, [e.get('version') for e in run.events('GSTPLAYER_EXTENDED')] == [10022],
+    check('%s: version 10023' % tag, [e.get('version') for e in run.events('GSTPLAYER_EXTENDED')] == [10023],
           repr(run.events('GSTPLAYER_EXTENDED')))
-    glib = [l for l in run.lines if 'CRITICAL' in l or 'GLib-GObject-WARNING' in l]
+    glib = [line for line in run.lines if 'CRITICAL' in line or 'GLib-GObject-WARNING' in line]
     check('%s: no GLib CRITICAL lines' % tag, not glib, repr(glib[:2]))
     play = run.events('PLAYBACK_PLAY')
     check('%s: PLAYBACK_PLAY sts 0' % tag, bool(play) and play[0].get('sts') == 0, repr(play))
@@ -162,7 +163,7 @@ def test_local_file(tmp):
     run = Run([os.path.join(MEDIA, 'a.mp4')] + SINKS)
     common_checks('local', run)
     lengths = [e.get('length', 0) for e in run.events('PLAYBACK_LENGTH')]
-    check('local: duration reported', any(3.5 < l < 4.5 for l in lengths), repr(lengths))
+    check('local: duration reported', any(3.5 < length < 4.5 for length in lengths), repr(lengths))
     check('local: audio track list', bool(run.events('a_l')), run.dump())
 
 
@@ -182,7 +183,8 @@ def test_ifd_missing_error(tmp):
     run = Run([os.path.join(MEDIA, 'a.mp4'), '-t', '1000', '-l', '0'] + SINKS, env=env, timeout=30)
     check('ifd-missing: no invalid JSON lines', not run.bad_json, repr(run.bad_json[:3]))
     msgs = [e.get('msg', '') for e in run.events('GST_ERROR')] + [e.get('msg', '') for e in run.events('GST_MISSING_PLUGIN')]
-    check('ifd-missing: error mentions "ifd" with quotes intact', any('"ifd"' in m or 'IFD' in m for m in msgs), repr(msgs) + '\n' + run.dump())
+    check('ifd-missing: error mentions "ifd" with quotes intact', any('"ifd"' in m or 'IFD' in m for m in msgs),
+          repr(msgs) + '\n' + run.dump())
 
 
 def test_ifd_growing_file(tmp):
@@ -223,6 +225,66 @@ def test_ifd_growing_file(tmp):
           'positions %r\n%s' % (positions, run.dump()))
 
 
+def track_checks(tag, run, width, height, languages=None):
+    """tracks must be reported without asking ('al'/'vc'), once they are
+    known, and not over and over again"""
+    videos = [v for v in run.events('v_c') if v.get('w') and v.get('h')]
+    check('%s: v_c with the video size' % tag, any(v['w'] == width and v['h'] == height for v in videos),
+          repr(run.events('v_c')) + '\n' + run.dump())
+    lists = [tracks for tracks in run.events('a_l') if tracks]
+    check('%s: non-empty a_l reported' % tag, bool(lists), repr(run.events('a_l')) + '\n' + run.dump())
+    if languages is not None and lists:
+        check('%s: a_l languages' % tag, [t.get('n') for t in lists[-1]] == languages, repr(lists))
+    check('%s: a_c reported' % tag, any(a.get('id', -1) >= 0 for a in run.events('a_c')), repr(run.events('a_c')))
+    # the list may grow while the streams show up, but is only sent again
+    # when it changed
+    for key in ('a_l', 'a_c', 'v_c'):
+        lines = [json.dumps(v, sort_keys=True) for v in run.events(key)]
+        unchanged = any(a == b for a, b in itertools.pairwise(lines))
+        check('%s: %s only when it changed' % (tag, key), not unchanged and len(lines) <= 8, repr(lines))
+
+
+def test_tracks_local(tmp):
+    print('tracks reported on their own (local MP4)')
+    run = Run([os.path.join(MEDIA, 'a.mp4')] + SINKS)
+    common_checks('tracks-local', run)
+    track_checks('tracks-local', run, 320, 240)
+
+
+def test_tracks_dash(tmp, base):
+    # starts with the 720p representation, switches to 1080p: the new size
+    # must be reported although it comes after the start
+    print('tracks reported on their own (DASH, 2 audio languages)')
+    run = Run(['%s/dash-multi/manifest.mpd' % base] + SINKS, timeout=60)
+    common_checks('tracks-dash', run)
+    track_checks('tracks-dash', run, 1920, 1080, ['deu', 'eng'])
+
+
+def test_tracks_ifd_live_mkv(tmp):
+    """what E2iPlayer does with a buffered download: ffmpeg merges the
+    streams into an MKV that grows while gstplayer2 plays it via ifd://"""
+    print('tracks of an MKV written live by ffmpeg, played through ifd://')
+    if not IFDSRC_DIR:
+        check('tracks-ifd-mkv: plugin dir given', False)
+        return
+    dst = os.path.join(tmp, 'merged.mkv')
+    ffmpeg = subprocess.Popen(['ffmpeg', '-v', 'error', '-y', '-re',
+                               '-f', 'lavfi', '-i', 'testsrc=d=10:s=640x360:r=25',
+                               '-f', 'lavfi', '-i', 'sine=f=440:d=10',
+                               '-c:v', 'libx264', '-g', '25', '-pix_fmt', 'yuv420p', '-c:a', 'aac',
+                               '-flush_packets', '1', '-f', 'matroska', dst],
+                              stdin=subprocess.DEVNULL)
+    deadline = time.time() + 10
+    while time.time() < deadline and (not os.path.exists(dst) or os.path.getsize(dst) < 32768):
+        time.sleep(0.1)
+    env = {'GST_PLUGIN_PATH': IFDSRC_DIR, 'GST_REGISTRY': os.path.join(tmp, 'reg-ifd-mkv.bin')}
+    commands = [(0.5, 'j')] * 24 + [(0.5, 't0')] + [(0.5, 'j')] * 6
+    run = Run([dst, '-l', '0', '-t', '5000'] + SINKS, env=env, timeout=60, commands=commands)
+    ffmpeg.wait(timeout=30)
+    common_checks('tracks-ifd-mkv', run)
+    track_checks('tracks-ifd-mkv', run, 640, 360)
+
+
 def test_http(tmp, base, name, path, prefix, segment_ext):
     print('%s over HTTP with -H headers' % name)
     with REQUESTS_LOCK:
@@ -252,7 +314,8 @@ def test_dash_variants(tmp, base):
         run = Run(['%s/dash-%s/manifest.mpd' % (base, name)] + SINKS, timeout=60)
         common_checks('dash-' + name, run)
         lengths = [e.get('length', 0) for e in run.events('PLAYBACK_LENGTH')]
-        check('dash-%s: prerolled (length reported)' % name, any(l > 10 for l in lengths), repr(lengths) + '\n' + run.dump())
+        check('dash-%s: prerolled (length reported)' % name, any(length > 10 for length in lengths),
+              repr(lengths) + '\n' + run.dump())
 
 
 def test_dash_multi(tmp, base):
@@ -288,6 +351,7 @@ def test_dash_multi(tmp, base):
     with REQUESTS_LOCK:
         segs = segments(REQUESTS, 'dash-multi/')
     check('dash-multi-i1: second language played', '3' in segs and '2' not in segs, repr(sorted(segs)))
+    check('dash-multi-i1: one a_s answer for -i', run.events('a_s') == [{'id': 1, 'sts': 0}], repr(run.events('a_s')))
 
 
 def test_mpd_in_query(tmp, base):
@@ -310,6 +374,9 @@ def main():
     test_dash_variants(tmp, base)
     test_dash_multi(tmp, base)
     test_mpd_in_query(tmp, base)
+    test_tracks_local(tmp)
+    test_tracks_dash(tmp, base)
+    test_tracks_ifd_live_mkv(tmp)
     server.shutdown()
     print('\n%d failed check(s)' % len(FAILED))
     for name in FAILED:

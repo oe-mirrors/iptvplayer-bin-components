@@ -102,7 +102,12 @@ static void InitInOut()
     fcntl(stdin->_fileno, F_SETFL, flags | O_NONBLOCK);
 
     /* Make read and write ends of g_pfd nonblocking */
-    pipe(g_pfd);
+    if (pipe(g_pfd) < 0)
+    {
+        /* without it the main loop cannot wait for gst messages */
+        perror("gstplayer: pipe");
+        exit(1);
+    }
     flags = fcntl(g_pfd[0], F_GETFL);
     fcntl(g_pfd[0], F_SETFL, flags | O_NONBLOCK); /* Make read end nonblocking */
 
@@ -113,24 +118,15 @@ static void InitInOut()
 static StrPair_t **AddHeader(StrPair_t **vector, const char *headerString)
 {
     int cnt;
-    char *ptr = 0;
-    int size = 0;
+    const char *ptr = strchr(headerString, '=');
     StrPair_t *headerField = NULL;
 
-    ptr = strchr(headerString, '=');
     if (ptr)
     {
-        headerField = calloc(1, sizeof(StrPair_t));
-
-        /* key */
-        size = ptr - headerString;
-        headerField->pKey = calloc(size+1, sizeof(char));
-        strncpy(headerField->pKey, headerString, size);
-
-        /* val */
-        size = strlen(ptr+1);
-        headerField->pVal = calloc(size+1, sizeof(char));
-        strncpy(headerField->pVal, ptr+1, size);
+        /* key=value; GLib aborts when out of memory instead of returning NULL */
+        headerField = g_new0(StrPair_t, 1);
+        headerField->pKey = g_strndup(headerString, ptr - headerString);
+        headerField->pVal = g_strdup(ptr + 1);
     }
     if (headerField)
     {
@@ -144,7 +140,7 @@ static StrPair_t **AddHeader(StrPair_t **vector, const char *headerString)
         else
             cnt = 1;
 
-        vector = realloc(vector, (cnt+1) * sizeof(StrPair_t *));
+        vector = g_renew(StrPair_t *, vector, cnt + 1);
 
         vector[cnt-1] = headerField;
         vector[cnt] = NULL;
@@ -161,12 +157,12 @@ static int HandleTracks(const char *argvBuff)
         case 'l':
         {
             int num = 0;
-            TrackDescription_t *TrackList = backend_get_tracks_list(argvBuff[0], &num);
+            backend_get_tracks_list(argvBuff[0], &num);
             break;
         }
         case 'c':
         {
-            TrackDescription_t *track = backend_get_current_track(argvBuff[0]);
+            backend_get_current_track(argvBuff[0]);
             break;
         }
         default:
@@ -195,6 +191,7 @@ int main(int argc,char* argv[])
     memset(argvBuff, '\0', sizeof(argvBuff));
 
     int audioTrackIdx = -1;
+    int audioTrackSts = -1;
     int commandRetVal = -1;
     int retCode = 0;
 
@@ -223,7 +220,7 @@ int main(int argc,char* argv[])
 #if GST_VERSION_MAJOR < 1
     int ver = 20;
 #else
-    int ver = 10022;
+    int ver = 10023;
 #endif
     fprintf(stderr, "{\"GSTPLAYER_EXTENDED\":{\"version\":%d,\"gst_ver_major\":%d}}\n", ver, GST_VERSION_MAJOR);
 
@@ -293,6 +290,10 @@ int main(int argc,char* argv[])
     if (downloadTimeout != -1)
         backend_set_download_timeout(downloadTimeout);
     backend_set_dash_max_video(dashMaxWidth, dashMaxHeight);
+    /* -i, before the start: the DASH pipeline takes the audio set when it is
+     * created, playbin switches once the track list is known */
+    if (audioTrackIdx >= 0)
+        audioTrackSts = backend_set_track('a', audioTrackIdx);
 
     commandRetVal = backend_play(filename, downloadBufferPath, ringBufferMaxSize, bufferDuration, bufferSize, pHeaderFields, videoSinkName, audioSinkName, subtitlesEnabled);
     {
@@ -300,19 +301,16 @@ int main(int argc,char* argv[])
         fprintf(stderr, "{\"PLAYBACK_PLAY\":{\"file\":\"%s\", \"sts\":%d}}\n", escapedFile, commandRetVal);
         g_free(escapedFile);
     }
+    if (0 == commandRetVal && audioTrackIdx >= 0)
+    {
+        /* same answer as for an "a<N>" command */
+        fprintf(stderr, "{\"a_s\":{\"id\":%d,\"sts\":%d}}\n", audioTrackIdx, audioTrackSts);
+    }
 
     if(0 == commandRetVal)
     {
         while(!g_terminated && backend_get_playback_info()->isPlaying)
         {
-            if (audioTrackIdx >= 0)
-            {
-                static char cmd[128] = ""; // static to not allocate on stack
-                sprintf(cmd, "a%d\n", audioTrackIdx);
-                HandleTracks(cmd);
-                audioTrackIdx = -1;
-            }
-
             backend_gst_poll();
 
             /* We made fgets non blocking, so it will return immediately when there is nothing to read */
@@ -413,7 +411,7 @@ int main(int argc,char* argv[])
                 commandRetVal = backend_query_position(&currentMSec);
                 if(0 == commandRetVal)
                 {
-                    fprintf(stderr, "{\"J\":{\"ms\":%lld}}\n", currentMSec);
+                    fprintf(stderr, "{\"J\":{\"ms\":%lld}}\n", (long long)currentMSec);
                 }
                 if(0 == commandRetVal || force)
                 {
@@ -463,27 +461,18 @@ int main(int argc,char* argv[])
                 commandRetVal = backend_query_position(&currentMSec);
                 if (0 == commandRetVal)
                 {
-                    fprintf(stderr, "{\"J\":{\"ms\":%lld}}\n", currentMSec);
+                    fprintf(stderr, "{\"J\":{\"ms\":%lld}}\n", (long long)currentMSec);
                 }
                 break;
             }
 
             case 'i':
             {
-                // PlaybackHandler_t *ptrP = player->playback;
-                // if(ptrP)
-                // {
-                    // fprintf(stderr, "{\"PLAYBACK_INFO\":{ \"isPlaying\":%s, \"isPaused\":%s, \"isForwarding\":%s, \"isSeeking\":%s, \"isCreationPhase\":%s,", \
-                    // DUMP_BOOL(ptrP->isPlaying), DUMP_BOOL(ptrP->isPaused), DUMP_BOOL(ptrP->isForwarding), DUMP_BOOL(ptrP->isSeeking), DUMP_BOOL(ptrP->isCreationPhase) );
-                    // fprintf(stderr, "\"BackWard\":%f, \"SlowMotion\":%d, \"Speed\":%d, \"AVSync\":%d,", ptrP->BackWard, ptrP->SlowMotion, ptrP->Speed, ptrP->AVSync);
-                    // fprintf(stderr, " \"isVideo\":%s, \"isAudio\":%s, \"isSubtitle\":%s, \"isDvbSubtitle\":%s, \"isTeletext\":%s, \"mayWriteToFramebuffer\":%s, \"abortRequested\":%s }}\n", \
-                    // DUMP_BOOL(ptrP->isVideo), DUMP_BOOL(ptrP->isAudio), DUMP_BOOL(ptrP->isSubtitle), DUMP_BOOL(ptrP->isDvbSubtitle), DUMP_BOOL(ptrP->isTeletext), DUMP_BOOL(ptrP->mayWriteToFramebuffer), DUMP_BOOL(ptrP->abortRequested) );
-                // }
                 break;
             }
             case 't':
             {
-                uint64_t timeout = 0;
+                unsigned long long timeout = 0;
                 if( 1 == sscanf(argvBuff+1, "%llu", &timeout))
                 {
                     backend_set_download_timeout(timeout);
