@@ -29,9 +29,11 @@ jobs:
         working-directory: gstplayer/gst-1.0
         run: |
           gcc -Wall -Werror=implicit-function-declaration -Werror=return-type -Werror=int-conversion \
-            -Werror=incompatible-pointer-types \
+            -Werror=incompatible-pointer-types -Werror=format -Werror=switch -Werror=unused-variable \
             *.c ../common/*.c -I../common/ \
-            $(pkg-config --cflags --libs gstreamer-1.0 gstreamer-pbutils-1.0) -o gstplayer2
+            $(pkg-config --cflags --libs gstreamer-1.0 gstreamer-pbutils-1.0) -o gstplayer2 2>&1 | tee build.log
+          # no warnings at all, so new ones show up
+          ! grep -q "warning:" build.log
           ./gstplayer2 2>&1 | head -3 || true
 
       - name: build gstplayer2 with ASan/UBSan
@@ -39,7 +41,9 @@ jobs:
         run: |
           gcc -g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined \
             *.c ../common/*.c -I../common/ \
-            $(pkg-config --cflags --libs gstreamer-1.0 gstreamer-pbutils-1.0) -o gstplayer2-asan
+            $(pkg-config --cflags --libs gstreamer-1.0 gstreamer-pbutils-1.0) -o gstplayer2-asan 2>&1 | tee build-asan.log
+          # -O1 enables the warn_unused_result checks the plain build does not do
+          ! grep -q "warning:" build-asan.log
 
       - name: build gst-ifdsrc (autotools, like the gst-ifdsrc recipe)
         working-directory: gst-ifdsrc/gst-ifdsrc
