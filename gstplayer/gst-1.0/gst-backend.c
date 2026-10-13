@@ -1034,7 +1034,7 @@ static GstElement* createDashPlaybackPipeline(const gchar* uri, const gchar *vid
     g_dash.audioPads = g_ptr_array_new_with_free_func(gst_object_unref);
     g_dash.audioWanted = g_audio_idx >= 0 ? g_audio_idx : 0;
     g_dash.vsinkFactory = pickFactory(videosink, "dreamvideosink", "dvbvideosink");
-    g_dash.asinkFactory = pickFactory(audiosink, "dreamaudiosink", "dvbaudiosink");
+    g_dash.asinkFactory = (audiosink && *audiosink) ? audiosink : "dvbaudiosink";
     g_mutex_unlock(&g_dash_lock);
 
     g_object_set(G_OBJECT(src), "location", uri, "timeout", (guint)60, "retries", (gint)20, NULL);
