@@ -3,6 +3,14 @@
 
 #include "gst-backend.h"
 
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+
+/* enigma2 follows the video of players outside its services here, e.g. for
+ * the automatic resolution */
+#define EXTERNAL_VIDEO_SOCKET "/var/run/video.socket"
+
 
 /* Track */
 TrackDescription_t *g_audio_tracks = NULL;
@@ -623,12 +631,32 @@ static gchar* TracksListLine(const char type, const TrackDescription_t *pTracks,
     return g_string_free(out, FALSE);
 }
 
+static void SendExternalVideo(const gchar *line)
+{
+    static int fd = -1;
+    struct sockaddr_un addr;
+
+    if (fd < 0)
+    {
+        fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+        if (fd < 0)
+            return;
+    }
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, EXTERNAL_VIDEO_SOCKET, sizeof(addr.sun_path) - 1);
+    /* without enigma2 listening it goes nowhere */
+    (void)sendto(fd, line, strlen(line), 0, (struct sockaddr *)&addr, sizeof(addr));
+}
+
 /* send a track line; unless asked for it, only when it changed */
 static void TrackLineSend(const int slot, gchar *line, const gboolean force)
 {
     if (force || g_strcmp0(line, g_track_lines[slot]))
     {
         fprintf(stderr, "%s\n", line);
+        if (g_str_has_prefix(line, "{\"v_c\""))
+            SendExternalVideo(line);
         g_free(g_track_lines[slot]);
         g_track_lines[slot] = line;
     }
