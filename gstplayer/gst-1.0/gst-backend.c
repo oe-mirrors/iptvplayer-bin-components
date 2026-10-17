@@ -831,9 +831,9 @@ static void dashParsedPadAdded(GstElement *parsebin, GstPad *pad, gpointer data)
         gst_caps_unref(caps);
         return;
     }
-    /* e2-sync/e2-async no-ops on dream*sinks (property missing). */
+    /* the pipeline goes to PLAYING on ASYNC_DONE, so the sinks preroll */
     gstSetBoolIfAvailable(sink, "e2-sync",  FALSE);
-    gstSetBoolIfAvailable(sink, "e2-async", FALSE);
+    gstSetBoolIfAvailable(sink, "e2-async", TRUE);
 
     /* keep the stream formats the hardware sinks got before */
     if (isVideo && !strcmp(media, "video/x-h264"))
