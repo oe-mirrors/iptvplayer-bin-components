@@ -37,13 +37,13 @@ int g_terminated = 0;
 
 static void SigHandler (int signum)
 {
-   // Ignore it so that another Ctrl-C doesn't appear any soon
-   signal(signum, SIG_IGN);
-
-   int ret = backend_stop();
-   fprintf(stderr, "{\"PLAYBACK_STOP\":{\"sts\":%d, \"ctrl-c\":1}}\n", ret);
-   g_terminated = 1;
-   exit(-1);
+   /* only async-signal-safe calls: the signal can interrupt the main thread
+    * inside a GStreamer call that holds a lock a stop would wait for */
+   static const char msg[] = "{\"PLAYBACK_STOP\":{\"sts\":0, \"ctrl-c\":1}}\n";
+   ssize_t ret = write(2, msg, sizeof(msg) - 1);
+   (void)signum;
+   (void)ret;
+   _exit(-1);
 }
 
 static int WaitForCommand()
