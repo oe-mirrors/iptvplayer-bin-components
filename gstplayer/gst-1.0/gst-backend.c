@@ -1205,6 +1205,10 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
                     GstCaps *subcaps = gst_caps_from_string("text/plain; text/x-plain; text/x-raw; text/x-pango-markup");
                     g_object_set (G_OBJECT (g_subsink), "caps", subcaps, NULL);
                     gst_caps_unref(subcaps);
+                    /* the receiver times the subtitles: a synced sink blocks the
+                     * text stream on cues far off the video clock (WebVTT of a
+                     * live stream), and with it the switch to new pads */
+                    g_object_set (G_OBJECT (g_subsink), "sync", FALSE, NULL);
                     g_object_set (G_OBJECT (g_gst_playbin), "text-sink", g_subsink, NULL);
                     g_object_set (G_OBJECT (g_gst_playbin), "current-text", -1, NULL);
                 }
