@@ -229,6 +229,18 @@ static void gstCBsubtitleAvail(GstElement *subsink, GstBuffer *buffer, gpointer 
     gst_buffer_unref(buffer);
 }
 
+static void gstCBsubsinkSync(GObject *subsink, GParamSpec *pspec, gpointer user_data)
+{
+    gboolean sync = FALSE;
+
+    (void)pspec;
+    (void)user_data;
+    /* playsink turns sync on when it builds the text chain */
+    g_object_get(subsink, "sync", &sync, NULL);
+    if (sync)
+        g_object_set(subsink, "sync", FALSE, NULL);
+}
+
 static void gstAboutToFinishCallback(GstElement* object, gpointer userdata)
 {
     //g_playback_info.isPlaying = 0;
@@ -1209,6 +1221,7 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
                      * text stream on cues far off the video clock (WebVTT of a
                      * live stream), and with it the switch to new pads */
                     g_object_set (G_OBJECT (g_subsink), "sync", FALSE, NULL);
+                    g_signal_connect (g_subsink, "notify::sync", G_CALLBACK (gstCBsubsinkSync), NULL);
                     g_object_set (G_OBJECT (g_gst_playbin), "text-sink", g_subsink, NULL);
                     g_object_set (G_OBJECT (g_gst_playbin), "current-text", -1, NULL);
                 }
