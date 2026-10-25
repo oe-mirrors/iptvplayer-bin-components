@@ -206,6 +206,22 @@ static void gstCBsubtitleAvail(GstElement *subsink, GstBuffer *buffer, gpointer 
     if (!buffer)
         return;
 
+    /* picture subtitles are taken only so they do not stop the stream */
+    GstPad *pad = gst_element_get_static_pad(subsink, "sink");
+    GstCaps *caps = pad ? gst_pad_get_current_caps(pad) : NULL;
+    gboolean text = TRUE;
+    if (caps && gst_caps_get_size(caps) > 0)
+        text = g_str_has_prefix(gst_structure_get_name(gst_caps_get_structure(caps, 0)), "text/");
+    if (caps)
+        gst_caps_unref(caps);
+    if (pad)
+        gst_object_unref(pad);
+    if (!text)
+    {
+        gst_buffer_unref(buffer);
+        return;
+    }
+
     GstMapInfo map;
     if (!gst_buffer_map(buffer, &map, GST_MAP_READ))
     {
@@ -227,6 +243,18 @@ static void gstCBsubtitleAvail(GstElement *subsink, GstBuffer *buffer, gpointer 
     }
     gst_buffer_unmap(buffer, &map);
     gst_buffer_unref(buffer);
+}
+
+static void gstCBsubsinkSync(GObject *subsink, GParamSpec *pspec, gpointer user_data)
+{
+    gboolean sync = FALSE;
+
+    (void)pspec;
+    (void)user_data;
+    /* playsink turns sync on when it builds the text chain */
+    g_object_get(subsink, "sync", &sync, NULL);
+    if (sync)
+        g_object_set(subsink, "sync", FALSE, NULL);
 }
 
 static void gstAboutToFinishCallback(GstElement* object, gpointer userdata)
@@ -831,9 +859,9 @@ static void dashParsedPadAdded(GstElement *parsebin, GstPad *pad, gpointer data)
         gst_caps_unref(caps);
         return;
     }
-    /* e2-sync/e2-async no-ops on dream*sinks (property missing). */
+    /* the pipeline goes to PLAYING on ASYNC_DONE, so the sinks preroll */
     gstSetBoolIfAvailable(sink, "e2-sync",  FALSE);
-    gstSetBoolIfAvailable(sink, "e2-async", FALSE);
+    gstSetBoolIfAvailable(sink, "e2-async", TRUE);
 
     /* keep the stream formats the hardware sinks got before */
     if (isVideo && !strcmp(media, "video/x-h264"))
@@ -1034,7 +1062,7 @@ static GstElement* createDashPlaybackPipeline(const gchar* uri, const gchar *vid
     g_dash.audioPads = g_ptr_array_new_with_free_func(gst_object_unref);
     g_dash.audioWanted = g_audio_idx >= 0 ? g_audio_idx : 0;
     g_dash.vsinkFactory = pickFactory(videosink, "dreamvideosink", "dvbvideosink");
-    g_dash.asinkFactory = pickFactory(audiosink, "dreamaudiosink", "dvbaudiosink");
+    g_dash.asinkFactory = (audiosink && *audiosink) ? audiosink : "dvbaudiosink";
     g_mutex_unlock(&g_dash_lock);
 
     g_object_set(G_OBJECT(src), "location", uri, "timeout", (guint)60, "retries", (gint)20, NULL);
@@ -1202,9 +1230,19 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
                 {
                     flags |= GST_PLAY_FLAG_TEXT;
                     g_signal_connect (g_subsink, "new-buffer", G_CALLBACK (gstCBsubtitleAvail), NULL);
-                    GstCaps *subcaps = gst_caps_from_string("text/plain; text/x-plain; text/x-raw; text/x-pango-markup");
+                    /* a TS carries picture subtitles too: a sink that refuses
+                     * them ends the whole stream (not-negotiated), take them
+                     * and drop them
+                     */
+                    GstCaps *subcaps = gst_caps_from_string("text/plain; text/x-plain; text/x-raw; text/x-pango-markup; "
+                        "subpicture/x-dvb; subpicture/x-pgs; subpicture/x-dvd; video/x-dvd-subpicture; subpicture/x-xsub");
                     g_object_set (G_OBJECT (g_subsink), "caps", subcaps, NULL);
                     gst_caps_unref(subcaps);
+                    /* the receiver times the subtitles: a synced sink blocks the
+                     * text stream on cues far off the video clock (WebVTT of a
+                     * live stream), and with it the switch to new pads */
+                    g_object_set (G_OBJECT (g_subsink), "sync", FALSE, NULL);
+                    g_signal_connect (g_subsink, "notify::sync", G_CALLBACK (gstCBsubsinkSync), NULL);
                     g_object_set (G_OBJECT (g_gst_playbin), "text-sink", g_subsink, NULL);
                     g_object_set (G_OBJECT (g_gst_playbin), "current-text", -1, NULL);
                 }
