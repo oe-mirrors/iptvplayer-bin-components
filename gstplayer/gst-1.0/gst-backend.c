@@ -206,6 +206,22 @@ static void gstCBsubtitleAvail(GstElement *subsink, GstBuffer *buffer, gpointer 
     if (!buffer)
         return;
 
+    /* picture subtitles are taken only so they do not stop the stream */
+    GstPad *pad = gst_element_get_static_pad(subsink, "sink");
+    GstCaps *caps = pad ? gst_pad_get_current_caps(pad) : NULL;
+    gboolean text = TRUE;
+    if (caps && gst_caps_get_size(caps) > 0)
+        text = g_str_has_prefix(gst_structure_get_name(gst_caps_get_structure(caps, 0)), "text/");
+    if (caps)
+        gst_caps_unref(caps);
+    if (pad)
+        gst_object_unref(pad);
+    if (!text)
+    {
+        gst_buffer_unref(buffer);
+        return;
+    }
+
     GstMapInfo map;
     if (!gst_buffer_map(buffer, &map, GST_MAP_READ))
     {
@@ -1214,7 +1230,12 @@ int backend_play(gchar *filename, gchar *download_buffer_path, guint64 ring_buff
                 {
                     flags |= GST_PLAY_FLAG_TEXT;
                     g_signal_connect (g_subsink, "new-buffer", G_CALLBACK (gstCBsubtitleAvail), NULL);
-                    GstCaps *subcaps = gst_caps_from_string("text/plain; text/x-plain; text/x-raw; text/x-pango-markup");
+                    /* a TS carries picture subtitles too: a sink that refuses
+                     * them ends the whole stream (not-negotiated), take them
+                     * and drop them
+                     */
+                    GstCaps *subcaps = gst_caps_from_string("text/plain; text/x-plain; text/x-raw; text/x-pango-markup; "
+                        "subpicture/x-dvb; subpicture/x-pgs; subpicture/x-dvd; video/x-dvd-subpicture; subpicture/x-xsub");
                     g_object_set (G_OBJECT (g_subsink), "caps", subcaps, NULL);
                     gst_caps_unref(subcaps);
                     /* the receiver times the subtitles: a synced sink blocks the
